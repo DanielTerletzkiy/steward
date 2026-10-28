@@ -1,8 +1,8 @@
-"""Calendars: chore due dates and best-before dates."""
+"""Calendars: chores, best-before dates, tasks, warranty ends and the meal plan."""
 
 from __future__ import annotations
 
-from datetime import date, datetime, timedelta
+from datetime import date, datetime, time, timedelta
 
 from homeassistant.components.calendar import CalendarEntity, CalendarEvent
 from homeassistant.core import HomeAssistant
@@ -16,7 +16,9 @@ from .entity import StewardEntity
 async def async_setup_entry(
     hass: HomeAssistant, entry: StewardConfigEntry, async_add_entities: AddConfigEntryEntitiesCallback
 ) -> None:
-    async_add_entities([ChoresCalendar(entry), DueDatesCalendar(entry), TasksCalendar(entry)])
+    async_add_entities(
+        [ChoresCalendar(entry), DueDatesCalendar(entry), TasksCalendar(entry), WarrantyCalendar(entry), MealPlanCalendar(entry)]
+    )
 
 
 def _all_day(day: date, summary: str, uid: str, description: str | None = None) -> CalendarEvent:
@@ -98,3 +100,53 @@ class TasksCalendar(_StewardCalendar):
             for task in self.coordinator.data.tasks
             if task["due_date"] and not task.get("done_at")
         ]
+
+
+class WarrantyCalendar(_StewardCalendar):
+    _attr_translation_key = "warranties"
+
+    def __init__(self, entry: StewardConfigEntry) -> None:
+        super().__init__(entry, "calendar_warranties")
+
+    def _events(self) -> list[CalendarEvent]:
+        return [
+            _all_day(
+                date.fromisoformat(item["warranty_until"]),
+                f"Warranty ends: {item['name']}",
+                f"warranty-{item['id']}",
+                " ".join(filter(None, (item.get("brand"), item.get("model")))) or None,
+            )
+            for item in self.coordinator.data.equipment
+            if item.get("warranty_until")
+        ]
+
+
+# Meal times for the calendar; the meal plan itself only knows the slot.
+SLOT_TIMES = {"breakfast": (7, 30), "lunch": (12, 30), "dinner": (19, 0), "snack": (16, 0)}
+
+
+class MealPlanCalendar(_StewardCalendar):
+    _attr_translation_key = "meal_plan"
+
+    def __init__(self, entry: StewardConfigEntry) -> None:
+        super().__init__(entry, "calendar_meal_plan")
+
+    def _events(self) -> list[CalendarEvent]:
+        data = self.coordinator.data
+        events = []
+        for meal in data.meal_plan:
+            hour, minute = SLOT_TIMES.get(meal["slot"], (12, 0))
+            start = datetime.combine(
+                date.fromisoformat(meal["day"]), time(hour, minute), tzinfo=dt_util.get_default_time_zone()
+            )
+            title = data.recipe_name(meal.get("recipe_id")) or meal.get("note") or meal["slot"]
+            events.append(
+                CalendarEvent(
+                    start=start,
+                    end=start + timedelta(hours=1),
+                    summary=title,
+                    uid=f"meal-{meal['id']}",
+                    description=meal["slot"].title() + (" · done" if meal["done"] else ""),
+                )
+            )
+        return events

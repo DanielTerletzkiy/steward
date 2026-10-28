@@ -10,9 +10,10 @@ from homeassistant.config_entries import ConfigEntry, ConfigFlow, ConfigFlowResu
 from homeassistant.const import CONF_TOKEN, CONF_URL
 from homeassistant.core import callback
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
+from homeassistant.helpers.service_info.hassio import HassioServiceInfo
 
 from .client import StewardAuthError, StewardClient, StewardError
-from .const import CONF_PANEL_URL, DOMAIN, SUPPORTED_API_VERSIONS
+from .const import CONF_APP, CONF_PANEL_URL, DOMAIN, SUPPORTED_API_VERSIONS
 
 
 async def _validate(hass, url: str, token: str) -> dict[str, Any]:
@@ -24,6 +25,27 @@ async def _validate(hass, url: str, token: str) -> dict[str, Any]:
 
 class StewardConfigFlow(ConfigFlow, domain=DOMAIN):
     VERSION = 1
+    _discovered: dict[str, Any]
+
+    async def async_step_hassio(self, discovery_info: HassioServiceInfo) -> ConfigFlowResult:
+        """The Steward app announced itself through the Supervisor."""
+        config = discovery_info.config
+        data = {CONF_URL: f"http://{config['host']}:{config['port']}", CONF_TOKEN: config["token"], CONF_APP: True}
+        await self.async_set_unique_id(DOMAIN)
+        # A reinstalled or moved app gets a new address or token: update the entry instead of asking again.
+        self._abort_if_unique_id_configured(updates=data)
+        self._discovered = data
+        return await self.async_step_hassio_confirm()
+
+    async def async_step_hassio_confirm(self, user_input: dict[str, Any] | None = None) -> ConfigFlowResult:
+        if user_input is not None:
+            try:
+                await _validate(self.hass, self._discovered[CONF_URL], self._discovered[CONF_TOKEN])
+            except StewardError:
+                return self.async_abort(reason="cannot_connect")
+            return self.async_create_entry(title="Steward", data=self._discovered)
+        self._set_confirm_only()
+        return self.async_show_form(step_id="hassio_confirm")
 
     async def async_step_user(self, user_input: dict[str, Any] | None = None) -> ConfigFlowResult:
         errors: dict[str, str] = {}

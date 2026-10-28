@@ -9,3 +9,8 @@ html, body { overscroll-behavior-y: none; }
 .clickable { cursor: pointer; }
 .line-through { text-decoration: line-through; }
 .v-list-item-title.wrap { white-space: normal; }
+.swatch { display: inline-block; width: 12px; height: 12px; border-radius: 50%; border: 1px solid rgba(128, 128, 128, 0.5); flex: none; }
+.highlight { background: rgba(var(--v-theme-primary), 0.22); color: inherit; border-radius: 3px; padding: 0 2px; font-weight: 600; }
+.scan-fab { position: fixed !important; right: 16px; bottom: calc(var(--v-layout-bottom, 0px) + 16px); z-index: 4; }
+@media (min-width: 960px) { .scan-fab { right: 32px; bottom: 32px; } }
+.page.has-fab { padding-bottom: 96px; }

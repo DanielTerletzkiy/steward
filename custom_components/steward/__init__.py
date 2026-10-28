@@ -14,12 +14,14 @@ from homeassistant.helpers.debounce import Debouncer
 from homeassistant.helpers.event import async_track_state_change_filtered, TrackStates
 from homeassistant.helpers.typing import ConfigType
 
+from . import bridge
+from .appliances import ApplianceTracker
 from .client import StewardAuthError, StewardClient, StewardError
-from .const import CONF_PANEL_URL, DOMAIN, LOGGER, PANEL_ICON, PANEL_PATH, SUPPORTED_API_VERSIONS
+from .const import CONF_APP, CONF_PANEL_URL, DOMAIN, LOGGER, PANEL_ICON, PANEL_PATH, SUPPORTED_API_VERSIONS
 from .coordinator import StewardConfigEntry, StewardCoordinator, StewardRuntime
 from .services import async_setup_services
 
-PLATFORMS = [Platform.BUTTON, Platform.CALENDAR, Platform.SENSOR, Platform.TODO]
+PLATFORMS = [Platform.BUTTON, Platform.CALENDAR, Platform.IMAGE, Platform.SENSOR, Platform.TODO]
 
 
 async def async_setup(hass: HomeAssistant, config: ConfigType) -> bool:
@@ -49,11 +51,17 @@ async def async_setup_entry(hass: HomeAssistant, entry: StewardConfigEntry) -> b
     async def on_event(_event: dict[str, Any]) -> None:
         await coordinator.async_request_refresh()
 
+    async def on_request(request: dict[str, Any]) -> Any:
+        return await bridge.handle(hass, request)
+
     entry.runtime_data.listener = entry.async_create_background_task(
-        hass, client.listen(on_event), f"{DOMAIN} event stream"
+        hass, client.listen(on_event, lambda: bridge.hello(hass), on_request), f"{DOMAIN} event stream"
     )
     _track_people(hass, entry, client)
     _register_panel(hass, entry)
+
+    _track_capabilities(hass, entry, client)
+    ApplianceTracker(hass, entry).async_start()
     entry.async_on_unload(entry.add_update_listener(_reload_on_options_change))
     return True
 
@@ -117,8 +125,35 @@ def _track_people(hass: HomeAssistant, entry: StewardConfigEntry, client: Stewar
 
 
 @callback
+def _track_capabilities(hass: HomeAssistant, entry: StewardConfigEntry, client: StewardClient) -> None:
+    """Tell the server again when AI Task or weather entities come or go (e.g. after HA has started)."""
+    known = bridge.hello(hass)["info"]
+
+    async def resend() -> None:
+        nonlocal known
+        hello = bridge.hello(hass)
+        if hello["info"] != known:
+            known = hello["info"]
+            await client.send(hello)
+
+    debouncer = Debouncer(hass, LOGGER, cooldown=5, immediate=False, function=resend)
+    entry.async_on_unload(debouncer.async_shutdown)
+
+    @callback
+    def on_change(event: Event) -> None:
+        # Only entities appearing or disappearing matter, not every forecast update.
+        if event.data.get("old_state") is None or event.data.get("new_state") is None:
+            debouncer.async_schedule_call()
+
+    tracker = async_track_state_change_filtered(hass, TrackStates(False, set(), {"ai_task", "weather"}), on_change)
+    entry.async_on_unload(tracker.async_remove)
+
+
+@callback
 def _register_panel(hass: HomeAssistant, entry: StewardConfigEntry) -> None:
-    """Sidebar entry. On HA OS the app's ingress panel replaces this; on Container installs it is an iframe."""
+    """Sidebar entry for Docker setups (an iframe). With the HA app, its ingress panel is the entry instead."""
+    if entry.data.get(CONF_APP):
+        return
     url = entry.options.get(CONF_PANEL_URL) or entry.data.get(CONF_PANEL_URL) or entry.data[CONF_URL]
     frontend.async_register_built_in_panel(
         hass,

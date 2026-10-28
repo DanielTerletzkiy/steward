@@ -30,6 +30,16 @@ def _parse_date(value: str | None) -> date | None:
     return date.fromisoformat(value) if value else None
 
 
+def _due(day: date | None) -> date | datetime | None:
+    """HA counts a past date-only due from the end of that day ("12 hours ago" for yesterday).
+
+    Overdue items get the start of their due day instead, so HA says "yesterday" like Steward does.
+    """
+    if day is None or day >= dt_util.now().date():
+        return day
+    return dt_util.start_of_local_day(day)
+
+
 class ShoppingListTodo(StewardEntity, TodoListEntity):
     _attr_icon = "mdi:cart"
     _attr_supported_features = (
@@ -99,7 +109,7 @@ class TasksTodo(StewardEntity, TodoListEntity):
                 uid=str(task["id"]),
                 summary=task["name"],
                 description=task.get("notes"),
-                due=_parse_date(task.get("due_date")),
+                due=_due(_parse_date(task.get("due_date"))),
                 status=TodoItemStatus.COMPLETED if task.get("done_at") else TodoItemStatus.NEEDS_ACTION,
             )
             for task in self.coordinator.data.tasks
@@ -121,7 +131,7 @@ class TasksTodo(StewardEntity, TodoListEntity):
 
 
 def _task_payload(item: TodoItem) -> dict:
-    due = item.due.date() if isinstance(item.due, datetime) else item.due
+    due = dt_util.as_local(item.due).date() if isinstance(item.due, datetime) else item.due
     return {"name": item.summary, "notes": item.description, "due_date": due.isoformat() if due else None}
 
 
@@ -152,7 +162,7 @@ class ChoresTodo(StewardEntity, TodoListEntity):
             TodoItem(
                 uid=str(chore["id"]),
                 summary=chore["name"],
-                due=dt_util.as_local(dt_util.parse_datetime(chore["next_due"])).date() if chore["next_due"] else None,
+                due=_due(dt_util.as_local(dt_util.parse_datetime(chore["next_due"])).date() if chore["next_due"] else None),
                 status=TodoItemStatus.NEEDS_ACTION,
             )
             for chore in self._mine()

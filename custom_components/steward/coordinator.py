@@ -11,6 +11,7 @@ from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.debounce import Debouncer
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, UpdateFailed
+from homeassistant.util import dt as dt_util
 
 from .client import StewardClient, StewardError
 from .const import DOMAIN, LOGGER
@@ -28,6 +29,13 @@ class StewardData:
     tasks: list[dict[str, Any]]
     people: list[dict[str, Any]]
     receipts: list[dict[str, Any]] = field(default_factory=list)
+    equipment: list[dict[str, Any]] = field(default_factory=list)
+    garments: list[dict[str, Any]] = field(default_factory=list)
+    recipes: list[dict[str, Any]] = field(default_factory=list)
+    meal_plan: list[dict[str, Any]] = field(default_factory=list)
+
+    def recipe_name(self, recipe_id: int | None) -> str | None:
+        return next((r["name"] for r in self.recipes if r["id"] == recipe_id), None)
 
     def person_name(self, person_id: str | None) -> str | None:
         return next((p["name"] for p in self.people if p["id"] == person_id), None)
@@ -57,13 +65,20 @@ class StewardCoordinator(DataUpdateCoordinator[StewardData]):
     async def _async_update_data(self) -> StewardData:
         try:
             lists = await self.client.get("api/shopping-lists")
-            summary, stock, chores, tasks, people, receipts, *items = await asyncio.gather(
+            start = dt_util.now().date() - timedelta(days=7)
+            end = start + timedelta(days=35)
+            (summary, stock, chores, tasks, people, receipts, equipment, garments, recipes, meal_plan,
+             *items) = await asyncio.gather(  # fmt: skip
                 self.client.get("api/summary"),
                 self.client.get("api/stock", include_empty="true"),
                 self.client.get("api/chores"),
                 self.client.get("api/tasks"),
                 self.client.get("api/people"),
                 self.client.get("api/receipts"),
+                self.client.get("api/equipment"),
+                self.client.get("api/wardrobe/garments"),
+                self.client.get("api/recipes"),
+                self.client.get("api/mealplan", start=start.isoformat(), end=end.isoformat()),
                 *(self.client.get(f"api/shopping-lists/{lst['id']}/items") for lst in lists),
             )
         except StewardError as err:
@@ -77,4 +92,8 @@ class StewardCoordinator(DataUpdateCoordinator[StewardData]):
             tasks=tasks,
             people=people,
             receipts=receipts,
+            equipment=equipment,
+            garments=garments,
+            recipes=recipes,
+            meal_plan=meal_plan,
         )

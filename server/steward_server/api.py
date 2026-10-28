@@ -10,8 +10,10 @@ from fastapi import APIRouter, Depends, File, HTTPException, Request, UploadFile
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from . import API_VERSION, __version__
+from .auth import session_user
 from .config import SUPERVISOR_INGRESS_IP, Settings
 from .events import EventHub
+from .ha_bridge import HABridge
 from .schemas import (
     ChoreExecuteIn,
     ChoreIn,
@@ -41,17 +43,35 @@ from .schemas import (
     TaskPatch,
 )
 from .services import catalog, chores, people, receipts, shopping, stock, summary, tasks
+from .services.files import FileStore
 
 
 def is_authorized(request_headers, client_host: str | None, query_token: str | None, settings: Settings) -> bool:
-    """Bearer token, HA ingress (only from the Supervisor's proxy), or trust-all for local development."""
+    """Bearer token, HA ingress (only from the Supervisor's proxy), a "Sign in with Home Assistant"
+    session cookie, or trust-all for local development."""
     if settings.trust_all:
         return True
     auth = request_headers.get("authorization", "")
     token = auth.removeprefix("Bearer ").strip() if auth.startswith("Bearer ") else query_token
     if token and secrets.compare_digest(token, settings.api_token):
         return True
-    return client_host == SUPERVISOR_INGRESS_IP and bool(request_headers.get("x-remote-user-id"))
+    if _ingress_user(request_headers, client_host):
+        return True
+    return session_user(request_headers, settings) is not None
+
+
+def _ingress_user(headers, client_host: str | None) -> dict[str, str] | None:
+    if client_host != SUPERVISOR_INGRESS_IP or not headers.get("x-remote-user-id"):
+        return None
+    return {
+        "uid": headers["x-remote-user-id"],
+        "name": headers.get("x-remote-user-display-name") or headers.get("x-remote-user-name") or "",
+    }
+
+
+def current_user(request: Request) -> dict[str, str] | None:
+    host = request.client.host if request.client else None
+    return _ingress_user(request.headers, host) or session_user(request.headers, request.app.state.settings)
 
 
 async def require_auth(request: Request) -> None:
@@ -69,14 +89,27 @@ def get_hub(request: Request) -> EventHub:
     return request.app.state.hub
 
 
+def get_bridge(request: Request) -> HABridge:
+    return request.app.state.bridge
+
+
+def get_files(request: Request) -> FileStore:
+    return request.app.state.files
+
+
 def get_actor(request: Request) -> str | None:
-    """Who is acting: the HA user from ingress, or what the integration passes along."""
-    return request.headers.get("x-steward-actor") or request.headers.get("x-remote-user-id")
+    """Who is acting: what the integration passes along, else the signed-in HA user."""
+    if actor := request.headers.get("x-steward-actor"):
+        return actor
+    user = current_user(request)
+    return user["uid"] if user else None
 
 
 Session = Annotated[AsyncSession, Depends(get_session)]
 Hub = Annotated[EventHub, Depends(get_hub)]
 Actor = Annotated[str | None, Depends(get_actor)]
+Files = Annotated[FileStore, Depends(get_files)]
+Bridge = Annotated[HABridge, Depends(get_bridge)]
 
 router = APIRouter(prefix="/api", dependencies=[Depends(require_auth)])
 
@@ -84,6 +117,18 @@ router = APIRouter(prefix="/api", dependencies=[Depends(require_auth)])
 @router.get("/info")
 async def info() -> dict:
     return {"name": "Steward", "version": __version__, "api_version": API_VERSION}
+
+
+@router.get("/me")
+async def me(request: Request) -> dict:
+    """Who the UI is talking as (null for API tokens and the local trust-all mode)."""
+    user = current_user(request)
+    settings = request.app.state.settings
+    return {
+        "user": {"id": user["uid"], "name": user["name"]} if user else None,
+        "can_sign_out": user is not None and session_user(request.headers, settings) is not None,
+        "app": settings.is_app,
+    }
 
 
 @router.get("/summary")
@@ -152,6 +197,7 @@ async def get_journal(session: Session, limit: int = 100):
 
 @router.post("/stock/purchase")
 async def post_purchase(session: Session, hub: Hub, actor: Actor, body: PurchaseIn) -> dict:
+    before = await stock.last_txn_id(session)
     entry = await stock.purchase(
         session,
         hub,
@@ -162,18 +208,21 @@ async def post_purchase(session: Session, hub: Hub, actor: Actor, body: Purchase
         unit_price=body.unit_price,
         actor=actor,
     )
-    return {"entry_id": entry.id}
+    return {"entry_id": entry.id, "txn_ids": await stock.txn_ids_after(session, before)}
 
 
 @router.post("/stock/consume")
 async def post_consume(session: Session, hub: Hub, actor: Actor, body: ConsumeIn) -> dict:
+    before = await stock.last_txn_id(session)
     taken = await stock.consume(session, hub, body.product_id, body.amount, spoiled=body.spoiled, actor=actor)
-    return {"consumed": taken}
+    return {"consumed": taken, "txn_ids": await stock.txn_ids_after(session, before)}
 
 
-@router.post("/stock/open", status_code=204)
-async def post_open(session: Session, hub: Hub, actor: Actor, body: OpenIn) -> None:
+@router.post("/stock/open")
+async def post_open(session: Session, hub: Hub, actor: Actor, body: OpenIn) -> dict:
+    before = await stock.last_txn_id(session)
     await stock.open_product(session, hub, body.product_id, body.amount, actor=actor)
+    return {"txn_ids": await stock.txn_ids_after(session, before)}
 
 
 @router.post("/stock/undo/{txn_id}", status_code=204)

@@ -86,3 +86,123 @@ get_stock:
       example: "Milch"
       selector:
         text:
+wear:
+  fields:
+    garments:
+      required: true
+      example: "Dark jeans, Grey merino sweater"
+      selector:
+        text:
+          multiple: true
+    date:
+      selector:
+        date:
+laundry_done:
+  fields:
+    garments:
+      selector:
+        text:
+          multiple: true
+search_manuals:
+  fields:
+    query:
+      required: true
+      example: "How do I descale the coffee machine?"
+      selector:
+        text:
+    limit:
+      default: 5
+      selector:
+        number:
+          min: 1
+          max: 20
+suggest_outfit:
+  fields:
+    person:
+      selector:
+        entity:
+          domain: person
+    occasion:
+      default: comfort
+      selector:
+        select:
+          translation_key: occasion
+          options: [home, comfort, going_out, work, sport, formal]
+    date:
+      selector:
+        date:
+    count:
+      default: 1
+      selector:
+        number:
+          min: 1
+          max: 5
+wear_outfit:
+  fields:
+    outfit_id:
+      required: true
+      selector:
+        number:
+          min: 1
+          max: 1000000
+          mode: box
+scan:
+  fields:
+    code:
+      required: true
+      example: "4006381333931"
+      selector:
+        text:
+    mode:
+      default: purchase
+      selector:
+        select:
+          translation_key: scan_mode
+          options: [purchase, consume, open, spoil, shopping, lookup]
+    amount:
+      selector:
+        number:
+          min: 0.01
+          max: 1000
+          step: 0.01
+          mode: box
+recognize:
+  fields:
+    camera:
+      selector:
+        entity:
+          domain: camera
+    paths:
+      example: "/media/groceries.jpg"
+      selector:
+        text:
+          multiple: true
+    hint:
+      selector:
+        text:
+suggest_recipes:
+  fields:
+    limit:
+      default: 5
+      selector:
+        number:
+          min: 1
+          max: 20
+complete_meal:
+  fields:
+    meal_id:
+      selector:
+        number:
+          min: 1
+          max: 1000000
+          mode: box
+    slot:
+      default: dinner
+      selector:
+        select:
+          translation_key: meal_slot
+          options: [breakfast, lunch, dinner, snack]
+    consume:
+      default: true
+      selector:
+        boolean:

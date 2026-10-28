@@ -19,8 +19,22 @@ def tile(entity: str, name: str, color: str, **extra) -> dict:
     return {"type": "tile", "entity": entity, "name": name, "color": color, **extra}
 
 
-def build(e: dict[str, str], person_key: str | None) -> dict:
+def press(entity: str, name: str, color: str, icon: str) -> dict:
+    """A tile that presses a button entity (buttons have no useful state to show)."""
+    return tile(entity, name, color, icon=icon, hide_state=True, grid_options={"columns": 12},
+                tap_action={"action": "perform-action", "perform_action": "button.press", "target": {"entity_id": entity}})
+
+
+def build(e: dict[str, str], person_key: str | None, person: str | None) -> dict:
     full = {"grid_options": {"columns": 12}}
+    owner = person or "household"
+    outfit_cards = []
+    if f"outfit_image_{owner}" in e:
+        outfit_cards = [
+            {"type": "picture-entity", "entity": e[f"outfit_image_{owner}"], "show_name": False, "show_state": False, **full},
+            tile(e[f"outfit_{owner}"], "Today's outfit", "deep-purple", **full),
+            press(e[f"suggest_outfit_{owner}"], "Suggest another outfit", "deep-purple", "mdi:hanger"),
+        ]
     chores_card = (
         [{"type": "todo-list", "entity": e[person_key], "title": "My chores", **full}] if person_key else []
     )
@@ -32,7 +46,7 @@ def build(e: dict[str, str], person_key: str | None) -> dict:
                 "path": "today",
                 "icon": "mdi:home-heart",
                 "type": "sections",
-                "max_columns": 3,
+                "max_columns": 4,
                 "sections": [
                     {
                         "type": "grid",
@@ -42,7 +56,7 @@ def build(e: dict[str, str], person_key: str | None) -> dict:
                             tile(e["expiring_soon"], "Expiring soon", "amber"),
                             tile(e["below_min_stock"], "Below minimum", "orange"),
                             tile(e["stock_value"], "Stock value", "green"),
-                            tile(e["add_missing"], "Add missing to list", "teal", **full),
+                            press(e["add_missing"], "Add missing to list", "teal", "mdi:cart-plus"),
                             {"type": "todo-list", "entity": e["shopping_1"], "title": "Shopping list", **full},
                         ],
                     },
@@ -59,6 +73,18 @@ def build(e: dict[str, str], person_key: str | None) -> dict:
                     {
                         "type": "grid",
                         "cards": [
+                            {"type": "heading", "heading": "Wardrobe", "icon": "mdi:tshirt-crew-outline"},
+                            *outfit_cards,
+                            tile(e["laundry"], "Laundry", "blue"),
+                            press(e["laundry_done"], "Laundry done", "blue", "mdi:washing-machine"),
+                            {"type": "heading", "heading": "Kitchen", "icon": "mdi:silverware-fork-knife"},
+                            tile(e["meals_today"], "Meals today", "orange", **full),
+                            tile(e["warranty_ending"], "Warranties ending", "red", **full),
+                        ],
+                    },
+                    {
+                        "type": "grid",
+                        "cards": [
                             {"type": "heading", "heading": "Money", "icon": "mdi:receipt-text-outline"},
                             tile(e["spending_month"], "This month", "teal"),
                             tile(e["last_trip"], "Last trip", "teal"),
@@ -67,7 +93,8 @@ def build(e: dict[str, str], person_key: str | None) -> dict:
                             {
                                 "type": "calendar",
                                 "initial_view": "listWeek",
-                                "entities": [e["calendar_chores"], e["calendar_due_dates"], e["calendar_tasks"]],
+                                "entities": [e["calendar_meal_plan"], e["calendar_chores"], e["calendar_due_dates"],
+                                             e["calendar_tasks"], e["calendar_warranties"]],
                                 **full,
                             },
                         ],
@@ -99,7 +126,8 @@ async def main(token: str, url: str) -> None:
                 key = entry["unique_id"].split("_", 1)[1]
                 entities[key] = entry["entity_id"]
         person_keys = sorted(k for k in entities if k.startswith("chores_person.") and k != "chores_everyone")
-        dashboard = build(entities, person_keys[0] if person_keys else None)
+        person = person_keys[0].removeprefix("chores_") if person_keys else None
+        dashboard = build(entities, person_keys[0] if person_keys else None, person)
 
         existing = {d["url_path"] for d in (await call(ws, 2, type="lovelace/dashboards/list"))["result"]}
         if URL_PATH not in existing:

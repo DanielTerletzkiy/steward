@@ -297,3 +297,389 @@ class ReceiptSummaryOut(ORM):
 class LineMatchIn(BaseModel):
     product_id: int | None = None
     new_product: ProductIn | None = None
+
+
+# --- files ----------------------------------------------------------------
+
+
+class FileOut(ORM):
+    id: str
+    kind: str
+    filename: str | None
+    content_type: str
+    size: int
+    pages: int | None
+    created_at: UTCDatetime
+
+
+# --- equipment ------------------------------------------------------------
+
+
+class EquipmentIn(BaseModel):
+    name: str
+    brand: str | None = None
+    model: str | None = None
+    serial: str | None = None
+    room: str | None = None
+    ha_device_id: str | None = None
+    ha_entities: list[str] = Field(default_factory=list)
+    kind: str = "other"
+    automation: dict = Field(default_factory=dict)
+    purchased_on: date | None = None
+    price: float | None = None
+    shop: str | None = None
+    warranty_until: date | None = None
+    notes: str | None = None
+    consumable_ids: list[int] = Field(default_factory=list)
+    chore_ids: list[int] = Field(default_factory=list)
+
+
+class EquipmentPatch(BaseModel):
+    name: str | None = None
+    brand: str | None = None
+    model: str | None = None
+    serial: str | None = None
+    room: str | None = None
+    ha_device_id: str | None = None
+    ha_entities: list[str] | None = None
+    kind: str | None = None
+    automation: dict | None = None
+    purchased_on: date | None = None
+    price: float | None = None
+    shop: str | None = None
+    warranty_until: date | None = None
+    notes: str | None = None
+    consumable_ids: list[int] | None = None
+    chore_ids: list[int] | None = None
+
+
+class EquipmentDocumentOut(ORM):
+    id: int
+    kind: str
+    title: str
+    file: FileOut
+
+
+class EquipmentOut(ORM):
+    id: int
+    name: str
+    brand: str | None
+    model: str | None
+    serial: str | None
+    room: str | None
+    ha_device_id: str | None
+    ha_entities: list[str]
+    kind: str
+    automation: dict  # overrides as set by the user
+    automation_effective: dict  # with the kind's defaults filled in
+    live: dict | None
+    live_at: UTCDatetime | None
+    run_count: int
+    last_run_at: UTCDatetime | None
+    purchased_on: date | None
+    price: float | None
+    shop: str | None
+    warranty_until: date | None
+    warranty_status: str  # none / active / ending / expired
+    notes: str | None
+    photo_id: str | None
+    consumable_ids: list[int]
+    chore_ids: list[int]
+    documents: list[EquipmentDocumentOut]
+
+
+class LiveIn(BaseModel):
+    """What the HA integration reports about a linked appliance right now."""
+
+    state: str | None = None
+    running: bool = False
+    remaining_minutes: float | None = None
+    battery: float | None = None
+    commands: list[str] = Field(default_factory=list)
+    entities: list[dict] = Field(default_factory=list)
+
+
+class FinishedIn(BaseModel):
+    source: str | None = None
+    detail: str | None = None
+
+
+class CommandIn(BaseModel):
+    command: str
+
+
+class ManualHit(BaseModel):
+    equipment_id: int
+    equipment_name: str
+    document_id: int
+    document_title: str
+    file_id: str
+    page: int
+    snippet: str
+
+
+# --- wardrobe -------------------------------------------------------------
+
+
+class GarmentIn(BaseModel):
+    owner: str | None = None
+    name: str
+    category: str
+    layer: str | None = None  # derived from the category when left out
+    colors: list[str] = Field(default_factory=list)
+    pattern: str | None = None
+    material: str | None = None
+    warmth: int = Field(3, ge=1, le=5)
+    temp_min: float | None = None
+    temp_max: float | None = None
+    rain: str = "none"
+    windproof: bool = False
+    formality: int = Field(2, ge=1, le=5)
+    uses: list[str] = Field(default_factory=list)
+    seasons: list[str] = Field(default_factory=list)
+    brand: str | None = None
+    size: str | None = None
+    price: float | None = None
+    favorite: bool = False
+    notes: str | None = None
+    wears_per_wash: int | None = None  # derived from the category when left out
+    photo_id: str | None = None
+
+
+class GarmentPatch(BaseModel):
+    owner: str | None = None
+    name: str | None = None
+    category: str | None = None
+    layer: str | None = None
+    colors: list[str] | None = None
+    pattern: str | None = None
+    material: str | None = None
+    warmth: int | None = Field(None, ge=1, le=5)
+    temp_min: float | None = None
+    temp_max: float | None = None
+    rain: str | None = None
+    windproof: bool | None = None
+    formality: int | None = Field(None, ge=1, le=5)
+    uses: list[str] | None = None
+    seasons: list[str] | None = None
+    brand: str | None = None
+    size: str | None = None
+    price: float | None = None
+    favorite: bool | None = None
+    notes: str | None = None
+    state: str | None = None
+    wears_per_wash: int | None = None
+    wears_since_wash: int | None = Field(None, ge=0)  # lets "undo laundry done" restore the count
+    photo_id: str | None = None
+
+
+class GarmentOut(ORM):
+    id: int
+    owner: str | None
+    name: str
+    category: str
+    layer: str
+    colors: list[str]
+    pattern: str | None
+    material: str | None
+    warmth: int
+    temp_min: float | None
+    temp_max: float | None
+    rain: str
+    windproof: bool
+    formality: int
+    uses: list[str]
+    seasons: list[str]
+    brand: str | None
+    size: str | None
+    price: float | None
+    favorite: bool
+    notes: str | None
+    photo_id: str | None
+    state: str
+    wears_per_wash: int
+    wears_since_wash: int
+    wear_count: int
+    last_worn: date | None
+    cost_per_wear: float | None
+
+
+class WearIn(BaseModel):
+    garment_ids: list[int]
+    day: date | None = None
+
+
+class LaundryIn(BaseModel):
+    garment_ids: list[int] | None = None  # None = everything in the laundry
+
+
+class OutfitIn(BaseModel):
+    owner: str | None = None
+    day: date | None = None
+    garment_ids: list[int]
+    occasion: str | None = None
+    worn: bool = False
+
+
+class OutfitFeedbackIn(BaseModel):
+    rating: int = Field(ge=-1, le=1)
+    feedback: str | None = None
+
+
+class OutfitOut(ORM):
+    id: int
+    owner: str | None
+    day: date
+    garment_ids: list[int]
+    source: str
+    occasion: str | None
+    weather: dict | None
+    reason: str | None
+    worn: bool
+    rating: int
+    feedback: str | None
+    created_at: UTCDatetime
+
+
+class StyleProfileIn(BaseModel):
+    description: str | None = None
+    likes: list[str] = Field(default_factory=list)
+    dislikes: list[str] = Field(default_factory=list)
+    runs_warm: int = Field(0, ge=-2, le=2)
+
+
+class StyleProfileOut(ORM):
+    owner: str
+    description: str | None
+    likes: list[str]
+    dislikes: list[str]
+    runs_warm: int
+
+
+# --- recipes and meal plan ------------------------------------------------
+
+
+class IngredientIn(BaseModel):
+    text: str
+    name: str | None = None  # parsed from text when left out
+    amount: float | None = None
+    unit: str | None = None
+    product_id: int | None = None
+    stock_amount: float | None = None
+    optional: bool = False
+    group: str | None = None
+
+
+class IngredientOut(ORM):
+    id: int
+    text: str
+    name: str
+    amount: float | None
+    unit: str | None
+    product_id: int | None
+    stock_amount: float | None
+    optional: bool
+    group: str | None
+
+
+class RecipeIn(BaseModel):
+    name: str
+    description: str | None = None
+    servings: int = Field(2, ge=1, le=50)
+    minutes: int | None = None
+    instructions: str | None = None
+    source_url: str | None = None
+    tags: list[str] = Field(default_factory=list)
+    favorite: bool = False
+    ingredients: list[IngredientIn] = Field(default_factory=list)
+
+
+class RecipePatch(BaseModel):
+    name: str | None = None
+    description: str | None = None
+    servings: int | None = Field(None, ge=1, le=50)
+    minutes: int | None = None
+    instructions: str | None = None
+    source_url: str | None = None
+    tags: list[str] | None = None
+    favorite: bool | None = None
+    ingredients: list[IngredientIn] | None = None  # replaces the list
+
+
+class RecipeOut(ORM):
+    id: int
+    name: str
+    description: str | None
+    servings: int
+    minutes: int | None
+    instructions: str | None
+    source_url: str | None
+    photo_id: str | None
+    tags: list[str]
+    favorite: bool
+    cooked_count: int
+    last_cooked: date | None
+    ingredients: list[IngredientOut]
+
+
+class IngredientStatus(BaseModel):
+    ingredient_id: int
+    name: str
+    product_id: int | None
+    product_name: str | None
+    needed: float | None  # in the product's unit, for the asked servings
+    in_stock: float | None
+    unit: str | None
+    status: str  # have / partial / missing / unlinked / optional
+    expiring: bool  # stock of it is due soon or expired: cooking this uses it up
+
+
+class Fulfillment(BaseModel):
+    recipe_id: int
+    servings: int
+    can_cook: bool
+    missing: int
+    unlinked: int
+    uses_expiring: int
+    ingredients: list[IngredientStatus]
+
+
+class RecipeSuggestion(BaseModel):
+    recipe: RecipeOut
+    fulfillment: Fulfillment
+    score: float
+
+
+class CookIn(BaseModel):
+    servings: int | None = None
+
+
+class RecipeImportIn(BaseModel):
+    url: str
+
+
+class MealPlanIn(BaseModel):
+    day: date
+    slot: str = "dinner"
+    recipe_id: int | None = None
+    note: str | None = None
+    servings: int | None = None
+
+
+class MealPlanPatch(BaseModel):
+    day: date | None = None
+    slot: str | None = None
+    recipe_id: int | None = None
+    note: str | None = None
+    servings: int | None = None
+    done: bool | None = None
+
+
+class MealPlanOut(ORM):
+    id: int
+    day: date
+    slot: str
+    recipe_id: int | None
+    note: str | None
+    servings: int | None
+    done: bool

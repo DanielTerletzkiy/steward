@@ -1,6 +1,7 @@
 // One WebSocket to api/ws for the whole app. Views subscribe to topics and refetch on events.
 import { onBeforeUnmount, ref } from 'vue'
 import type { Topic } from '@/types'
+import { auth, requireLogin } from './auth'
 
 type Listener = (topic: Topic | '*') => void
 
@@ -52,10 +53,23 @@ function connect() {
       /* ignore */
     }
   }
-  socket.onclose = () => {
+  let opened = false
+  socket.addEventListener('open', () => (opened = true))
+  socket.onclose = (ev) => {
     connected.value = false
     window.clearInterval(pingTimer)
     socket = null
+    if (ev.code === 4401) {
+      // Not signed in (any more): sign in rather than retrying forever.
+      requireLogin()
+      if (auth.failed) return
+    } else if (!opened) {
+      // A rejected handshake often arrives as a plain 1006 close; ask the API whether we are signed in.
+      fetch('api/info', { credentials: 'same-origin' })
+        .then((r) => r.status === 401 && requireLogin())
+        .catch(() => undefined)
+    }
+    if (auth.failed) return
     scheduleReconnect()
   }
   socket.onerror = () => socket?.close()

@@ -6,7 +6,7 @@ import asyncio
 from typing import Any
 
 # Topics a client can expect. Each change publishes the topic of the data that changed.
-TOPICS = ("stock", "shopping", "chores", "tasks", "receipts", "people", "catalog")
+TOPICS = ("stock", "shopping", "chores", "tasks", "receipts", "people", "catalog", "equipment", "wardrobe", "settings", "recipes", "mealplan")
 
 
 class EventHub:

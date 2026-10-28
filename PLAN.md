@@ -14,7 +14,33 @@
 
 ## Status (2026-10-28)
 
-A first slice runs locally (`docker compose -f dev/docker-compose.yml up -d`): the Steward server (stock ledger, shopping lists, chores with schedules and assignment, tasks, REWE eBon import with alias and fuzzy matching, people sync, WebSocket events) and the `steward` integration (to-do lists for shopping, tasks and each person's chores; sensors for stock, money and chores; calendars; actions; sidebar panel), plus a "Household" dashboard. Not yet: Alembic migrations, the HA app packaging, AI, wardrobe, recipes, equipment, labels.
+Runs locally (`docker compose -f dev/docker-compose.yml up -d`), plus an installable HA app (`dev/scripts/build_app.sh`).
+
+**Server**
+- Stock ledger, shopping lists, chores with schedules and assignment, tasks.
+- REWE eBon import with alias and fuzzy matching.
+- Equipment with photos, manual PDFs (full-text search with page numbers), warranty, consumables and chores.
+- Appliances linked to HA devices or entities: live status, finished runs (vacuum docking, LG ThinQ completion events, run-state sensors), chores completed or made due, laundry prompt, vacuum commands.
+- Wardrobe: clothes with photos and qualities, wear and laundry tracking, outfits, style profiles.
+- Outfit engine: rules, then AI, then the rules check again. Weather comes from the HA weather entity, with Open-Meteo as a fallback.
+- AI provider layer: HA AI Task through the integration, Anthropic, OpenAI, Gemini, Ollama, OpenAI-compatible. One provider per job.
+- Scanning: local barcodes, then Open Food Facts (cached), GS1 codes with expiry dates, AI photo recognition.
+- Recipes: website import (schema.org), "can I cook it" against stock, cook, missing items to the list.
+- Meal plan.
+- "Sign in with Home Assistant" for direct access; ingress identity in the app; Supervisor discovery.
+
+**Integration**
+- To-do lists, sensors, calendars (chores, due dates, tasks, warranties, meal plan).
+- Today's outfit as a sensor and image per person.
+- Buttons, and actions for stock, chores, wardrobe, scanning, recipes and manuals.
+- Answers the server's AI Task and weather requests.
+
+**Not yet**
+- Alembic (new columns are added automatically for now).
+- Published multi-arch images and CI.
+- Batteries, custom fields and lists, labels and printing, IMAP intake.
+- ESPHome scan station, Assist intents and LLM tools, blueprints.
+- AI quality is untested: no provider credentials were available while building.
 
 ## TL;DR
 

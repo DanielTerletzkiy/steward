@@ -6,7 +6,7 @@ from homeassistant.helpers.device_registry import DeviceEntryType, DeviceInfo
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
 from .const import DOMAIN
-from .coordinator import StewardConfigEntry, StewardCoordinator
+from .coordinator import StewardConfigEntry, StewardCoordinator, StewardData
 
 
 class StewardEntity(CoordinatorEntity[StewardCoordinator]):
@@ -29,3 +29,15 @@ class StewardEntity(CoordinatorEntity[StewardCoordinator]):
     @property
     def client(self):
         return self._entry.runtime_data.client
+
+
+def outfit_owners(entry: StewardConfigEntry) -> list[tuple[str, str | None]]:
+    """Whose outfit gets entities: each HA person, or the household when there are no people."""
+    people = entry.runtime_data.coordinator.data.people
+    active = [p for p in people if p.get("active", True)]
+    return [(p["id"], p["name"]) for p in active] or [("", None)]
+
+
+def todays_outfit(data: StewardData, owner: str) -> dict | None:
+    outfits = data.summary.get("wardrobe", {}).get("outfits_today", {})
+    return outfits.get(owner) or outfits.get("")

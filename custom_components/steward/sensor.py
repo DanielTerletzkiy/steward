@@ -1,4 +1,4 @@
-"""Sensors: stock warnings, money, chores and tasks."""
+"""Sensors: stock warnings, money, chores, tasks, warranties and laundry."""
 
 from __future__ import annotations
 
@@ -9,9 +9,10 @@ from typing import Any
 from homeassistant.components.sensor import SensorDeviceClass, SensorEntity, SensorEntityDescription, SensorStateClass
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.entity_platform import AddConfigEntryEntitiesCallback
+from homeassistant.util import dt as dt_util
 
 from .coordinator import StewardConfigEntry, StewardData
-from .entity import StewardEntity
+from .entity import StewardEntity, outfit_owners, todays_outfit
 
 
 @dataclass(frozen=True, kw_only=True)
@@ -116,6 +117,22 @@ SENSORS: tuple[StewardSensorDescription, ...] = (
         value=lambda d: len(d.summary["tasks"]["due"]),
         attributes=lambda d: {"tasks": [t["name"] for t in d.summary["tasks"]["due"]], "open": d.summary["tasks"]["open"]},
     ),
+    StewardSensorDescription(
+        key="warranty_ending",
+        translation_key="warranty_ending",
+        icon="mdi:shield-alert-outline",
+        state_class=SensorStateClass.MEASUREMENT,
+        value=lambda d: len(d.summary["equipment"]["warranty_ending"]),
+        attributes=lambda d: {"equipment": d.summary["equipment"]["warranty_ending"]},
+    ),
+    StewardSensorDescription(
+        key="laundry",
+        translation_key="laundry",
+        icon="mdi:basket-outline",
+        state_class=SensorStateClass.MEASUREMENT,
+        value=lambda d: d.summary["wardrobe"]["laundry"],
+        attributes=lambda d: {"pieces": [g["name"] for g in d.garments if g["state"] == "laundry"]},
+    ),
 )
 
 
@@ -125,6 +142,8 @@ async def async_setup_entry(
     data = entry.runtime_data.coordinator.data
     entities: list[SensorEntity] = [StewardSensor(entry, description) for description in SENSORS]
     entities.extend(PersonChoresSensor(entry, person["id"], person["name"]) for person in data.people)
+    entities.extend(OutfitSensor(entry, owner, name) for owner, name in outfit_owners(entry))
+    entities.append(MealsTodaySensor(entry))
     async_add_entities(entities)
 
 
@@ -169,3 +188,72 @@ class PersonChoresSensor(StewardEntity, SensorEntity):
     def _chores(self) -> list[str]:
         person = self.coordinator.data.summary["people"].get(self._person_id) or {}
         return person.get("chores_due", [])
+
+
+class OutfitSensor(StewardEntity, SensorEntity):
+    """Today's outfit: the pieces as the state, the reason and weather as attributes."""
+
+    _attr_icon = "mdi:tshirt-crew-outline"
+
+    def __init__(self, entry: StewardConfigEntry, owner: str, name: str | None) -> None:
+        super().__init__(entry, f"outfit_{owner or 'household'}")
+        self._owner = owner
+        if name is None:
+            self._attr_translation_key = "outfit_household"
+        else:
+            self._attr_translation_key = "outfit_person"
+            self._attr_translation_placeholders = {"person": name}
+
+    def _outfit(self) -> dict | None:
+        return todays_outfit(self.coordinator.data, self._owner)
+
+    def _pieces(self, outfit: dict) -> list[str]:
+        names = {g["id"]: g["name"] for g in self.coordinator.data.garments}
+        return [names[i] for i in outfit["garment_ids"] if i in names]
+
+    @property
+    def native_value(self) -> str | None:
+        outfit = self._outfit()
+        return ", ".join(self._pieces(outfit))[:255] if outfit else None
+
+    @property
+    def extra_state_attributes(self) -> dict[str, Any] | None:
+        outfit = self._outfit()
+        if outfit is None:
+            return None
+        return {
+            "outfit_id": outfit["id"],
+            "pieces": self._pieces(outfit),
+            "reason": outfit.get("reason"),
+            "worn": outfit.get("worn"),
+            "source": outfit.get("source"),
+        }
+
+
+class MealsTodaySensor(StewardEntity, SensorEntity):
+    """What's planned to eat today: dinner (or the next meal) as the state, every slot as attributes."""
+
+    _attr_translation_key = "meals_today"
+    _attr_icon = "mdi:silverware-fork-knife"
+
+    def __init__(self, entry: StewardConfigEntry) -> None:
+        super().__init__(entry, "meals_today")
+
+    def _today(self) -> list[dict]:
+        today = dt_util.now().date().isoformat()
+        return [m for m in self.coordinator.data.meal_plan if m["day"] == today]
+
+    def _title(self, meal: dict) -> str:
+        return self.coordinator.data.recipe_name(meal.get("recipe_id")) or meal.get("note") or meal["slot"]
+
+    @property
+    def native_value(self) -> str | None:
+        meals = self._today()
+        main = next((m for m in meals if m["slot"] == "dinner"), None) or next((m for m in meals if not m["done"]), None)
+        return self._title(main)[:255] if main else None
+
+    @property
+    def extra_state_attributes(self) -> dict[str, Any]:
+        return {m["slot"]: self._title(m) for m in self._today()} | {
+            "done": [m["slot"] for m in self._today() if m["done"]]
+        }

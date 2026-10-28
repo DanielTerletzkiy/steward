@@ -22,8 +22,10 @@ services:
     environment:
       TZ: Europe/Berlin
       STEWARD_API_TOKEN: ${STEWARD_API_TOKEN:-dev-token}
-      # Local demo only: the sidebar iframe calls the API without a token.
-      STEWARD_TRUST_ALL: "true"
+      # "Sign in with Home Assistant" for the web UI: HA as this container reaches it, and as the
+      # browser reaches it.
+      STEWARD_HA_URL: http://homeassistant:8123
+      STEWARD_HA_PUBLIC_URL: http://localhost:8123
       STEWARD_SEED_DEMO: "true"
       STEWARD_DEMO_RECEIPTS: /samples
     volumes:

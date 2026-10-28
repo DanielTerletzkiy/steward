@@ -9,6 +9,10 @@
           "token": "API-Token",
           "panel_url": "Seitenleisten-URL (wie dein Browser sie erreicht)"
         }
+      },
+      "hassio_confirm": {
+        "title": "Steward",
+        "description": "Steward einrichten, die Haushalts-App in Home Assistant?"
       }
     },
     "error": {
@@ -16,7 +20,8 @@
       "invalid_auth": "Das API-Token wurde abgelehnt."
     },
     "abort": {
-      "already_configured": "Steward ist bereits eingerichtet."
+      "already_configured": "Steward ist bereits eingerichtet.",
+      "cannot_connect": "Die Steward-App ist nicht erreichbar."
     }
   },
   "options": {
@@ -73,6 +78,21 @@
       },
       "person_chores": {
         "name": "Hausarbeiten fällig {person}"
+      },
+      "warranty_ending": {
+        "name": "Garantie läuft ab"
+      },
+      "laundry": {
+        "name": "Wäsche"
+      },
+      "outfit_person": {
+        "name": "Outfit {person}"
+      },
+      "outfit_household": {
+        "name": "Outfit heute"
+      },
+      "meals_today": {
+        "name": "Essen heute"
       }
     },
     "calendar": {
@@ -84,11 +104,34 @@
       },
       "tasks": {
         "name": "Aufgaben"
+      },
+      "warranties": {
+        "name": "Garantien"
+      },
+      "meal_plan": {
+        "name": "Essensplan"
       }
     },
     "button": {
       "add_missing": {
         "name": "Fehlendes auf die Einkaufsliste"
+      },
+      "laundry_done": {
+        "name": "Wäsche fertig"
+      },
+      "suggest_outfit_person": {
+        "name": "Outfit vorschlagen {person}"
+      },
+      "suggest_outfit_household": {
+        "name": "Outfit vorschlagen"
+      }
+    },
+    "image": {
+      "outfit_person": {
+        "name": "Outfit {person}"
+      },
+      "outfit_household": {
+        "name": "Outfit heute"
       }
     }
   },
@@ -183,6 +226,170 @@
           "name": "Produktfilter",
           "description": "Teil eines Produktnamens."
         }
+      }
+    },
+    "wear": {
+      "name": "Kleidung tragen",
+      "description": "Vermerkt, dass Kleidungsstücke getragen wurden. Was gewaschen werden muss, kommt in die Wäsche.",
+      "fields": {
+        "garments": {
+          "name": "Kleidung",
+          "description": "Namen oder IDs der Stücke."
+        },
+        "date": {
+          "name": "Datum",
+          "description": "Standard ist heute."
+        }
+      }
+    },
+    "laundry_done": {
+      "name": "Wäsche fertig",
+      "description": "Markiert Kleidung als gewaschen: die ganze Wäsche oder die angegebenen Stücke.",
+      "fields": {
+        "garments": {
+          "name": "Kleidung",
+          "description": "Namen oder IDs. Leer lassen für die ganze Wäsche."
+        }
+      }
+    },
+    "search_manuals": {
+      "name": "Anleitungen durchsuchen",
+      "description": "Durchsucht die hochgeladenen Bedienungsanleitungen und liefert passende Stellen mit Seitenzahl.",
+      "fields": {
+        "query": {
+          "name": "Frage",
+          "description": "Wonach gesucht wird."
+        },
+        "limit": {
+          "name": "Ergebnisse",
+          "description": "Wie viele Stellen zurückgegeben werden."
+        }
+      }
+    },
+    "suggest_outfit": {
+      "name": "Outfit vorschlagen",
+      "description": "Schlägt Outfits aus sauberer Kleidung vor, passend zu Wetter, Anlass und Stil.",
+      "fields": {
+        "person": {
+          "name": "Person",
+          "description": "Wessen Kleiderschrank. Leer lassen für den Haushalt."
+        },
+        "occasion": {
+          "name": "Anlass",
+          "description": "Was heute ansteht."
+        },
+        "date": {
+          "name": "Datum",
+          "description": "Standard ist heute."
+        },
+        "count": {
+          "name": "Vorschläge",
+          "description": "Wie viele Outfits."
+        }
+      }
+    },
+    "wear_outfit": {
+      "name": "Outfit tragen",
+      "description": "Vermerkt, dass ein vorgeschlagenes Outfit getragen wird.",
+      "fields": {
+        "outfit_id": {
+          "name": "Outfit",
+          "description": "ID aus Outfit vorschlagen."
+        }
+      }
+    },
+    "scan": {
+      "name": "Barcode scannen",
+      "description": "Verarbeitet einen gescannten Barcode: Produkt einkaufen, verbrauchen, öffnen, als verdorben buchen, auf die Einkaufsliste setzen oder nur nachschlagen.",
+      "fields": {
+        "code": {
+          "name": "Code",
+          "description": "Barcode oder GS1-Daten."
+        },
+        "mode": {
+          "name": "Modus",
+          "description": "Was der Scan bewirkt."
+        },
+        "amount": {
+          "name": "Menge",
+          "description": "Standard ist die bekannte Packungsgröße."
+        }
+      }
+    },
+    "recognize": {
+      "name": "Lebensmittel erkennen",
+      "description": "Erkennt Lebensmittel und liest Haltbarkeitsdaten auf einem Foto per KI. Gibt die Artikel zurück; nichts wird eingebucht.",
+      "fields": {
+        "camera": {
+          "name": "Kamera",
+          "description": "Ein Bild von dieser Kamera aufnehmen."
+        },
+        "paths": {
+          "name": "Bilddateien",
+          "description": "Pfade in einem erlaubten Ordner."
+        },
+        "hint": {
+          "name": "Hinweis",
+          "description": "Zusätzlicher Kontext für die KI."
+        }
+      }
+    },
+    "suggest_recipes": {
+      "name": "Rezepte vorschlagen",
+      "description": "Rezepte für heute: was sich aus dem Vorrat kochen lässt, vor allem mit dem, was bald abläuft.",
+      "fields": {
+        "limit": {
+          "name": "Rezepte",
+          "description": "Wie viele zurückgegeben werden."
+        }
+      }
+    },
+    "complete_meal": {
+      "name": "Mahlzeit erledigt",
+      "description": "Markiert eine geplante Mahlzeit als gegessen und bucht die Zutaten aus dem Vorrat aus.",
+      "fields": {
+        "meal_id": {
+          "name": "Mahlzeit",
+          "description": "ID im Essensplan. Leer lassen für die heutige Mahlzeit im angegebenen Slot."
+        },
+        "slot": {
+          "name": "Mahlzeit",
+          "description": "Welche der heutigen Mahlzeiten."
+        },
+        "consume": {
+          "name": "Zutaten verbrauchen",
+          "description": "Die Zutaten des Rezepts aus dem Vorrat ausbuchen."
+        }
+      }
+    }
+  },
+  "selector": {
+    "occasion": {
+      "options": {
+        "home": "Zuhause",
+        "comfort": "Bequem",
+        "going_out": "Ausgehen",
+        "work": "Arbeit",
+        "sport": "Sport",
+        "formal": "Festlich"
+      }
+    },
+    "scan_mode": {
+      "options": {
+        "purchase": "Einkaufen",
+        "consume": "Verbrauchen",
+        "open": "Öffnen",
+        "spoil": "Verdorben",
+        "shopping": "Auf die Einkaufsliste",
+        "lookup": "Nachschlagen"
+      }
+    },
+    "meal_slot": {
+      "options": {
+        "breakfast": "Frühstück",
+        "lunch": "Mittagessen",
+        "dinner": "Abendessen",
+        "snack": "Snack"
       }
     }
   }

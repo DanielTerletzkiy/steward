@@ -182,6 +182,17 @@ async def execute(
     return await to_out(session, chore)
 
 
+async def make_due(session: AsyncSession, hub: EventHub, chore_id: int, at: datetime | None = None) -> None:
+    """Due now, e.g. "empty the dishwasher" once the dishwasher has finished. Caller commits."""
+    chore = await session.get(Chore, chore_id)
+    if chore is None:
+        return
+    now = at or utcnow()
+    if chore.next_due is None or as_utc(chore.next_due) > now:
+        chore.next_due = now
+    hub.publish("chores", chore_id=chore.id)
+
+
 async def refresh_assignees(session: AsyncSession) -> None:
     """Recompute who is next for every chore, e.g. after people were added or removed. Caller commits."""
     for chore in (await session.scalars(select(Chore))).all():

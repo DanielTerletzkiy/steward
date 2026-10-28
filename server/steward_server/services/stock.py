@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from datetime import date, datetime, timedelta
 
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..events import EventHub
@@ -189,11 +189,13 @@ async def open_product(
                 opened_at=utcnow(),
             )
             session.add(opened)
+            await session.flush()
+            session.add(StockTxn(type="open", product_id=product.id, entry_id=opened.id, amount=remaining, actor=actor))
             remaining = 0
         else:
             entry.opened_at = utcnow()
             remaining -= entry.amount
-    session.add(StockTxn(type="open", product_id=product.id, amount=amount, actor=actor))
+            session.add(StockTxn(type="open", product_id=product.id, entry_id=entry.id, amount=entry.amount, actor=actor))
     await session.commit()
     hub.publish("stock", product_id=product.id)
 
@@ -213,6 +215,21 @@ async def undo(session: AsyncSession, hub: EventHub, txn_id: int) -> None:
         if entry is None:
             raise Invalid("The stock entry no longer exists")
         entry.amount = round(entry.amount + txn.amount, 6)
+    elif txn.type == "open":
+        if entry is None or entry.opened_at is None:
+            raise Invalid("The opened stock entry no longer exists")
+        entry.opened_at = None
+        # A lot that was split when opening goes back into its unopened sibling.
+        sibling = await session.scalar(
+            select(StockEntry).where(
+                StockEntry.id != entry.id, StockEntry.product_id == entry.product_id, StockEntry.opened_at.is_(None),
+                StockEntry.due_date.is_(entry.due_date) if entry.due_date is None else StockEntry.due_date == entry.due_date,
+                StockEntry.purchased_at == entry.purchased_at, StockEntry.amount > 0,
+            )
+        )  # fmt: skip
+        if sibling is not None:
+            sibling.amount = round(sibling.amount + entry.amount, 6)
+            entry.amount = 0
     else:
         raise Invalid(f"Cannot undo a {txn.type} transaction")
     txn.undone = True
@@ -257,3 +274,12 @@ async def _auto_add_to_shopping_list(session: AsyncSession, product: Product) ->
     from .shopping import ensure_on_list  # local import: shopping imports stock
 
     await ensure_on_list(session, product, product.min_stock - amount)
+
+
+async def txn_ids_after(session: AsyncSession, after_id: int) -> list[int]:
+    """Ledger ids written since `after_id`, so callers can offer an exact undo."""
+    return list((await session.scalars(select(StockTxn.id).where(StockTxn.id > after_id).order_by(StockTxn.id))).all())
+
+
+async def last_txn_id(session: AsyncSession) -> int:
+    return await session.scalar(select(func.max(StockTxn.id))) or 0

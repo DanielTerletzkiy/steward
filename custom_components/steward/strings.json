@@ -9,6 +9,10 @@
           "token": "API token",
           "panel_url": "Sidebar URL (as your browser reaches it)"
         }
+      },
+      "hassio_confirm": {
+        "title": "Steward",
+        "description": "Set up Steward, the household app running in Home Assistant?"
       }
     },
     "error": {
@@ -16,7 +20,8 @@
       "invalid_auth": "The API token was rejected."
     },
     "abort": {
-      "already_configured": "Steward is already set up."
+      "already_configured": "Steward is already set up.",
+      "cannot_connect": "Cannot reach the Steward app."
     }
   },
   "options": {
@@ -73,6 +78,21 @@
       },
       "person_chores": {
         "name": "Chores due {person}"
+      },
+      "warranty_ending": {
+        "name": "Warranties ending"
+      },
+      "laundry": {
+        "name": "Laundry"
+      },
+      "outfit_person": {
+        "name": "Outfit {person}"
+      },
+      "outfit_household": {
+        "name": "Today's outfit"
+      },
+      "meals_today": {
+        "name": "Meals today"
       }
     },
     "calendar": {
@@ -84,11 +104,34 @@
       },
       "tasks": {
         "name": "Tasks"
+      },
+      "warranties": {
+        "name": "Warranties"
+      },
+      "meal_plan": {
+        "name": "Meal plan"
       }
     },
     "button": {
       "add_missing": {
         "name": "Add missing products to shopping list"
+      },
+      "laundry_done": {
+        "name": "Laundry done"
+      },
+      "suggest_outfit_person": {
+        "name": "Suggest outfit {person}"
+      },
+      "suggest_outfit_household": {
+        "name": "Suggest outfit"
+      }
+    },
+    "image": {
+      "outfit_person": {
+        "name": "Outfit {person}"
+      },
+      "outfit_household": {
+        "name": "Today's outfit"
       }
     }
   },
@@ -183,6 +226,170 @@
           "name": "Product filter",
           "description": "Part of a product name."
         }
+      }
+    },
+    "wear": {
+      "name": "Wear clothes",
+      "description": "Logs that pieces of clothing were worn. Pieces that need washing go to the laundry.",
+      "fields": {
+        "garments": {
+          "name": "Clothes",
+          "description": "Names or ids of the pieces."
+        },
+        "date": {
+          "name": "Date",
+          "description": "Defaults to today."
+        }
+      }
+    },
+    "laundry_done": {
+      "name": "Laundry done",
+      "description": "Marks clothes as washed: everything in the laundry, or the pieces given.",
+      "fields": {
+        "garments": {
+          "name": "Clothes",
+          "description": "Names or ids. Leave empty for the whole laundry."
+        }
+      }
+    },
+    "search_manuals": {
+      "name": "Search manuals",
+      "description": "Searches the uploaded equipment manuals and returns matching passages with page numbers.",
+      "fields": {
+        "query": {
+          "name": "Question",
+          "description": "What to look for."
+        },
+        "limit": {
+          "name": "Results",
+          "description": "How many passages to return."
+        }
+      }
+    },
+    "suggest_outfit": {
+      "name": "Suggest outfit",
+      "description": "Suggests outfits for the day from clean clothes, based on the weather forecast, the occasion and your style.",
+      "fields": {
+        "person": {
+          "name": "Person",
+          "description": "Whose wardrobe. Leave empty for the household."
+        },
+        "occasion": {
+          "name": "Occasion",
+          "description": "What the day holds."
+        },
+        "date": {
+          "name": "Date",
+          "description": "Defaults to today."
+        },
+        "count": {
+          "name": "Suggestions",
+          "description": "How many outfits."
+        }
+      }
+    },
+    "wear_outfit": {
+      "name": "Wear outfit",
+      "description": "Logs that a suggested outfit is being worn.",
+      "fields": {
+        "outfit_id": {
+          "name": "Outfit",
+          "description": "Id from suggest_outfit."
+        }
+      }
+    },
+    "scan": {
+      "name": "Scan barcode",
+      "description": "Handles a scanned barcode: buy, use, open or spoil the product, put it on the shopping list, or just look it up.",
+      "fields": {
+        "code": {
+          "name": "Code",
+          "description": "Barcode or GS1 data."
+        },
+        "mode": {
+          "name": "Mode",
+          "description": "What the scan does."
+        },
+        "amount": {
+          "name": "Amount",
+          "description": "Defaults to the pack size known for the code."
+        }
+      }
+    },
+    "recognize": {
+      "name": "Recognize groceries",
+      "description": "Identifies groceries and reads best-before dates on a photo using AI. Returns the items; nothing is stocked.",
+      "fields": {
+        "camera": {
+          "name": "Camera",
+          "description": "Take a snapshot from this camera."
+        },
+        "paths": {
+          "name": "Image files",
+          "description": "Paths in an allowed folder."
+        },
+        "hint": {
+          "name": "Hint",
+          "description": "Extra context for the AI."
+        }
+      }
+    },
+    "suggest_recipes": {
+      "name": "Suggest recipes",
+      "description": "Recipes ranked for today: what can be cooked from stock, especially using up what expires.",
+      "fields": {
+        "limit": {
+          "name": "Recipes",
+          "description": "How many to return."
+        }
+      }
+    },
+    "complete_meal": {
+      "name": "Complete meal",
+      "description": "Marks a planned meal as eaten and takes its ingredients out of stock.",
+      "fields": {
+        "meal_id": {
+          "name": "Meal",
+          "description": "Meal plan entry id. Leave empty for today's meal in the given slot."
+        },
+        "slot": {
+          "name": "Meal",
+          "description": "Which of today's meals."
+        },
+        "consume": {
+          "name": "Use up ingredients",
+          "description": "Take the recipe's ingredients out of stock."
+        }
+      }
+    }
+  },
+  "selector": {
+    "occasion": {
+      "options": {
+        "home": "Home",
+        "comfort": "Comfort",
+        "going_out": "Going out",
+        "work": "Work",
+        "sport": "Sport",
+        "formal": "Formal"
+      }
+    },
+    "scan_mode": {
+      "options": {
+        "purchase": "Purchase",
+        "consume": "Consume",
+        "open": "Open",
+        "spoil": "Spoiled",
+        "shopping": "Add to shopping list",
+        "lookup": "Look up"
+      }
+    },
+    "meal_slot": {
+      "options": {
+        "breakfast": "Breakfast",
+        "lunch": "Lunch",
+        "dinner": "Dinner",
+        "snack": "Snack"
       }
     }
   }

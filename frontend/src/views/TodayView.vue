@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed } from 'vue'
+import { computed, ref } from 'vue'
 import { api } from '@/api'
 import { LOCALE, t } from '@/i18n'
 import { useResource } from '@/composables/resource'
@@ -7,18 +7,56 @@ import { useCatalog } from '@/composables/catalog'
 import { attempt, notify } from '@/composables/notify'
 import { consume } from '@/composables/stockActions'
 import {
-  formatAmount, formatDateTime, formatEuro, mdiIcon, parseDateTime, parseDay, relativeDue, relativeExpiry,
+  formatAmount, formatDate, formatDateTime, formatEuro, mdiIcon, parseDateTime, parseDay, relativeDue, relativeExpiry, todayIso,
 } from '@/composables/format'
+import { label, laundryDone, sourceIcon } from '@/composables/wardrobe'
+import { completeMeal, SLOTS } from '@/composables/recipes'
+import { kindIcon, liveSummary } from '@/composables/appliances'
 import EmptyState from '@/components/EmptyState.vue'
 import StatusChip from '@/components/StatusChip.vue'
-import type { Chore, Summary } from '@/types'
+import GarmentThumb from '@/components/GarmentThumb.vue'
+import OutfitCollage from '@/components/OutfitCollage.vue'
+import MealDoneDialog from '@/components/MealDoneDialog.vue'
+import LaundryPromptBanner from '@/components/LaundryPromptBanner.vue'
+import type { Chore, Garment, MealPlanEntry, Summary } from '@/types'
 
 const { data, loading, error, reload } = useResource<Summary | null>(
   () => api.summary(),
-  ['stock', 'shopping', 'chores', 'tasks', 'receipts', 'people', 'catalog'],
+  ['stock', 'shopping', 'chores', 'tasks', 'receipts', 'people', 'catalog', 'wardrobe', 'equipment', 'mealplan', 'recipes', 'settings'],
   null,
 )
+const { data: garments } = useResource<Garment[]>(() => api.garments(), ['wardrobe'], [])
 const { productsById, personName } = useCatalog()
+
+type TodayMeal = Summary['meals_today'][number]
+const todaysMeals = computed(() => [...(data.value?.meals_today ?? [])].sort((a, b) => SLOTS.indexOf(a.slot) - SLOTS.indexOf(b.slot)))
+const mealName = (m: TodayMeal | MealPlanEntry) =>
+  (m.recipe_id != null ? ('name' in m && m.name) || t.mealplan.deletedRecipe : m.note ?? '') as string
+const mealLink = (m: TodayMeal) => (m.recipe_id != null && m.name ? `/recipes/${m.recipe_id}` : '/mealplan')
+const asEntry = (m: TodayMeal): MealPlanEntry => ({ id: m.id, day: todayIso(), slot: m.slot, recipe_id: m.recipe_id, note: m.note, servings: m.servings, done: m.done })
+const mealDoneName = ref('')
+const mealDoneOpen = ref(false)
+const mealDoneFor = ref<MealPlanEntry | null>(null)
+async function mealDone(m: TodayMeal) {
+  if (m.recipe_id == null) return void (await completeMeal(asEntry(m), false))
+  mealDoneFor.value = asEntry(m)
+  mealDoneName.value = mealName(m)
+  mealDoneOpen.value = true
+}
+
+const garmentsById = computed(() => new Map(garments.value.map((g) => [g.id, g])))
+const outfitsToday = computed(() =>
+  Object.entries(data.value?.wardrobe.outfits_today ?? {})
+    .map(([owner, outfit]) => ({ owner, name: owner ? personName(owner) ?? owner : t.today.household, outfit }))
+    .sort((a, b) => a.name.localeCompare(b.name, LOCALE)),
+)
+const laundryPieces = computed(() => garments.value.filter((g) => g.state === 'laundry'))
+const washing = ref(false)
+async function doLaundry() {
+  washing.value = true
+  await laundryDone(laundryPieces.value)
+  washing.value = false
+}
 
 const greeting = computed(() => {
   const h = new Date().getHours()
@@ -59,7 +97,7 @@ async function consumeOne(productId: number, spoiled = false) {
 </script>
 
 <template>
-  <div class="page">
+  <div class="page has-fab">
     <div class="mb-5">
       <div class="page-title">{{ greeting }}</div>
       <div class="text-body-2 text-medium-emphasis">{{ todayLabel }}</div>
@@ -74,6 +112,9 @@ async function consumeOne(productId: number, spoiled = false) {
     </v-row>
 
     <v-row v-else-if="data">
+      <v-col v-if="data.wardrobe.laundry_prompt" cols="12">
+        <LaundryPromptBanner :prompt="data.wardrobe.laundry_prompt" :pieces="laundryPieces" @changed="reload" />
+      </v-col>
       <!-- Spending / key numbers -->
       <v-col cols="12">
         <v-row dense>
@@ -124,6 +165,50 @@ async function consumeOne(productId: number, spoiled = false) {
             </v-card>
           </v-col>
         </v-row>
+      </v-col>
+
+      <!-- Today's meals -->
+      <v-col cols="12" md="6" lg="4">
+        <v-card class="h-100" variant="flat" border>
+          <v-card-item prepend-icon="mdi-silverware-fork-knife" :title="t.mealplan.todayMeals">
+            <template #append><v-btn icon="mdi-chevron-right" variant="text" size="small" to="/mealplan" :title="t.nav.mealplan" /></template>
+          </v-card-item>
+          <EmptyState v-if="!todaysMeals.length" compact icon="mdi-calendar-blank-outline" :title="t.mealplan.noMealsToday">
+            <v-btn color="primary" variant="tonal" prepend-icon="mdi-calendar-plus" to="/mealplan">{{ t.mealplan.planMeals }}</v-btn>
+          </EmptyState>
+          <v-list v-else density="comfortable" bg-color="transparent">
+            <v-list-item
+              v-for="m in todaysMeals"
+              :key="m.id"
+              :to="mealLink(m)"
+              :prepend-icon="m.recipe_id != null ? t.mealplan.slotIcons[m.slot] : 'mdi-note-text-outline'"
+            >
+              <v-list-item-title :class="{ 'line-through text-medium-emphasis': m.done }">{{ mealName(m) }}</v-list-item-title>
+              <v-list-item-subtitle>{{ t.mealplan.slots[m.slot] }}</v-list-item-subtitle>
+              <template #append>
+                <v-chip v-if="m.done" color="success" variant="tonal" size="small" prepend-icon="mdi-check" label>{{ t.mealplan.done }}</v-chip>
+                <v-btn v-else color="primary" variant="tonal" size="small" prepend-icon="mdi-check" @click.stop.prevent="mealDone(m)">{{ t.common.done }}</v-btn>
+              </template>
+            </v-list-item>
+          </v-list>
+        </v-card>
+      </v-col>
+
+      <!-- Running now -->
+      <v-col v-if="data.equipment.running.length" cols="12" md="6" lg="4">
+        <v-card class="h-100" variant="flat" border>
+          <v-card-item prepend-icon="mdi-play-circle-outline" :title="t.appliances.runningNow">
+            <template #append><v-chip color="primary" variant="tonal">{{ data.equipment.running.length }}</v-chip></template>
+          </v-card-item>
+          <v-list density="comfortable" bg-color="transparent">
+            <v-list-item v-for="r in data.equipment.running" :key="r.id" :to="`/equipment/${r.id}`" :title="r.name" append-icon="mdi-chevron-right">
+              <template #prepend>
+                <v-avatar color="primary" variant="tonal" size="36" class="running-avatar"><v-icon :icon="kindIcon[r.kind] ?? 'mdi-devices'" size="20" /></v-avatar>
+              </template>
+              <v-list-item-subtitle class="text-primary">{{ liveSummary(r.kind, { ...r, running: true }).text }}</v-list-item-subtitle>
+            </v-list-item>
+          </v-list>
+        </v-card>
       </v-col>
 
       <!-- Chores -->
@@ -206,9 +291,88 @@ async function consumeOne(productId: number, spoiled = false) {
               </template>
             </v-list-item>
           </v-list>
-          <v-card-actions><v-btn variant="text" to="/chores" append-icon="mdi-chevron-right">{{ t.nav.chores }}</v-btn></v-card-actions>
+          <v-card-actions><v-btn variant="text" to="/chores" append-icon="mdi-chevron-right">{{ t.today.allTasks }}</v-btn></v-card-actions>
+        </v-card>
+      </v-col>
+
+      <!-- Today's outfit -->
+      <v-col cols="12" md="6" lg="4">
+        <v-card class="h-100" variant="flat" border>
+          <v-card-item prepend-icon="mdi-hanger" :title="t.today.outfit">
+            <template #append><v-btn icon="mdi-chevron-right" variant="text" size="small" to="/wardrobe" :title="t.nav.wardrobe" /></template>
+          </v-card-item>
+          <EmptyState v-if="!outfitsToday.length" compact icon="mdi-tshirt-crew-outline" :title="t.today.noOutfit">
+            <v-btn color="primary" variant="tonal" prepend-icon="mdi-hanger" to="/wardrobe">{{ t.today.pickOutfit }}</v-btn>
+          </EmptyState>
+          <v-card-text v-else class="pt-0">
+            <div v-for="o in outfitsToday" :key="o.owner" class="mb-3">
+              <div class="d-flex align-center text-caption text-medium-emphasis mb-1">
+                <span v-if="outfitsToday.length > 1 || o.owner" class="font-weight-medium text-high-emphasis mr-1">{{ o.name }} ·</span>
+                <v-icon :icon="sourceIcon[o.outfit.source] ?? 'mdi-hanger'" size="14" class="mr-1" />{{ label.source(o.outfit.source) }}
+                <v-spacer />
+                <v-chip v-if="o.outfit.worn" color="success" variant="tonal" size="x-small" prepend-icon="mdi-check" label>{{ t.wardrobe.worn }}</v-chip>
+              </div>
+              <OutfitCollage :ids="o.outfit.garment_ids" :garments="garmentsById" row :max="5" :tile="64" />
+              <div v-if="o.outfit.reason" class="text-body-2 text-medium-emphasis mt-1">{{ o.outfit.reason }}</div>
+            </div>
+          </v-card-text>
+        </v-card>
+      </v-col>
+
+      <!-- Laundry -->
+      <v-col cols="12" md="6" lg="4">
+        <v-card class="h-100 d-flex flex-column" variant="flat" border>
+          <v-card-item prepend-icon="mdi-washing-machine" :title="t.today.laundry" :subtitle="t.today.cleanCount(data.wardrobe.clean)">
+            <template #append><v-chip v-if="data.wardrobe.laundry" color="warning" variant="tonal">{{ data.wardrobe.laundry }}</v-chip></template>
+          </v-card-item>
+          <EmptyState v-if="!data.wardrobe.laundry" compact icon="mdi-check-all" :title="t.today.laundryEmpty" />
+          <template v-else>
+            <v-card-text class="pt-0">
+              <div class="text-body-1 mb-2">{{ t.today.laundryCount(data.wardrobe.laundry) }}</div>
+              <div class="d-flex flex-wrap ga-1">
+                <div v-for="g in laundryPieces.slice(0, 8)" :key="g.id" style="width: 40px" :title="g.name">
+                  <GarmentThumb :photo-id="g.photo_id" :layer="g.layer" :icon-size="18" rounded="md" />
+                </div>
+              </div>
+            </v-card-text>
+            <v-spacer />
+            <v-card-actions>
+              <v-btn color="primary" variant="tonal" prepend-icon="mdi-check-all" :loading="washing" @click="doLaundry">{{ t.wardrobe.laundryDone }}</v-btn>
+            </v-card-actions>
+          </template>
+        </v-card>
+      </v-col>
+
+      <!-- Warranty ending -->
+      <v-col v-if="data.equipment.warranty_ending.length" cols="12" md="6" lg="4">
+        <v-card class="h-100" variant="flat" border>
+          <v-card-item prepend-icon="mdi-shield-alert-outline" :title="t.today.warrantyEnding">
+            <template #append><v-chip color="warning" variant="tonal">{{ data.equipment.warranty_ending.length }}</v-chip></template>
+          </v-card-item>
+          <v-list density="comfortable" bg-color="transparent">
+            <v-list-item v-for="e in data.equipment.warranty_ending" :key="e.id" :to="`/equipment/${e.id}`" :title="e.name" append-icon="mdi-chevron-right">
+              <v-list-item-subtitle class="text-warning">{{ t.today.warrantyUntil(formatDate(e.warranty_until)) }}</v-list-item-subtitle>
+            </v-list-item>
+          </v-list>
         </v-card>
       </v-col>
     </v-row>
+    <MealDoneDialog v-model="mealDoneOpen" :entry="mealDoneFor" :name="mealDoneName" />
+    <v-btn class="scan-fab" color="primary" size="large" rounded="lg" elevation="4" prepend-icon="mdi-barcode-scan" to="/scan" height="56">{{ t.nav.scan }}</v-btn>
   </div>
 </template>
+
+<style scoped>
+.running-avatar {
+  animation: running-pulse 2s ease-in-out infinite;
+}
+@keyframes running-pulse {
+  0%,
+  100% {
+    box-shadow: 0 0 0 0 rgba(var(--v-theme-primary), 0.4);
+  }
+  50% {
+    box-shadow: 0 0 0 6px rgba(var(--v-theme-primary), 0);
+  }
+}
+</style>

@@ -103,3 +103,19 @@ export function mdiIcon(icon: string | null | undefined, fallback = 'mdi-broom')
   if (!icon) return fallback
   return icon.replace(/^mdi:/, 'mdi-')
 }
+
+const rtf = new Intl.RelativeTimeFormat(LOCALE, { numeric: 'auto' })
+/** "2 hours ago", "in 5 minutes", "yesterday" for a timestamp. */
+export function relativeTime(s: string | Date): string {
+  const d = typeof s === 'string' ? parseDateTime(s) : s
+  const sec = Math.round((d.getTime() - Date.now()) / 1000)
+  const abs = Math.abs(sec)
+  if (abs < 45) return rtf.format(0, 'second')
+  if (abs < 3600) return rtf.format(Math.round(sec / 60), 'minute')
+  if (abs < 86400) return rtf.format(Math.round(sec / 3600), 'hour')
+  if (abs < 86400 * 7) return rtf.format(Math.round(sec / 86400), 'day')
+  return formatDate(typeof s === 'string' ? s : d.toISOString())
+}
+
+const timeFmt = new Intl.DateTimeFormat(LOCALE, { hour: '2-digit', minute: '2-digit' })
+export const formatTime = (s: string) => timeFmt.format(parseDateTime(s))

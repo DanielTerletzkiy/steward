@@ -5,10 +5,14 @@ from __future__ import annotations
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from . import chores as chores_service
+from . import equipment as equipment_service
 from . import people as people_service
 from . import receipts as receipts_service
+from . import recipes as recipes_service
 from . import stock as stock_service
 from . import tasks as tasks_service
+from . import settings as settings_store
+from . import wardrobe as wardrobe_service
 from ..timeutil import today
 
 
@@ -27,6 +31,11 @@ async def summary(session: AsyncSession) -> dict:
     chores = await chores_service.list_chores(session)
     tasks = await tasks_service.list_tasks(session, include_done=False)
     people = await people_service.list_people(session)
+    equipment = await equipment_service.list_equipment(session)
+    garments = await wardrobe_service.list_garments(session)
+    outfits_today = await wardrobe_service.list_outfits(session, day=today())
+    meals = await recipes_service.meal_plan(session, today(), today())
+    recipe_names = {r.id: r.name for r in await recipes_service.list_recipes(session)} if meals else {}
 
     due_chores = [c for c in chores if c.status in ("overdue", "due_today")]
     per_person = {
@@ -58,4 +67,42 @@ async def summary(session: AsyncSession) -> dict:
         },
         "spending": await receipts_service.spending(session),
         "people": per_person,
+        "meals_today": [
+            {"id": m.id, "slot": m.slot, "recipe_id": m.recipe_id, "name": recipe_names.get(m.recipe_id) or m.note,
+             "note": m.note, "servings": m.servings, "done": m.done}
+            for m in meals
+        ],  # fmt: skip
+        "equipment": {
+            "count": len(equipment),
+            "warranty_ending": [
+                {"id": e.id, "name": e.name, "warranty_until": e.warranty_until.isoformat()}
+                for e in equipment
+                if e.warranty_status == "ending"
+            ],
+            "running": [
+                {"id": e.id, "name": e.name, "kind": e.kind, "state": e.live.get("state"),
+                 "remaining_minutes": e.live.get("remaining_minutes"), "battery": e.live.get("battery")}
+                for e in equipment
+                if e.live and e.live.get("running")
+            ],  # fmt: skip
+        },
+        "wardrobe": {
+            "garments": len(garments),
+            "clean": sum(1 for g in garments if g.state in ("clean", "worn")),
+            "laundry": sum(1 for g in garments if g.state == "laundry"),
+            # A washing machine finished: "mark the laundry as clean?"
+            "laundry_prompt": await settings_store.get(session, "laundry_prompt"),
+            # Today's outfit per owner ("" = household): the worn one, else the newest suggestion.
+            "outfits_today": {
+                owner: {"id": o.id, "garment_ids": o.garment_ids, "worn": o.worn, "source": o.source, "reason": o.reason}
+                for owner, o in _today_outfits(outfits_today).items()
+            },
+        },
     }
+
+
+def _today_outfits(outfits) -> dict:
+    chosen: dict = {}
+    for outfit in sorted(outfits, key=lambda o: (o.worn, o.id)):
+        chosen[outfit.owner or ""] = outfit
+    return chosen

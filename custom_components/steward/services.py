@@ -11,12 +11,15 @@ from homeassistant.config_entries import ConfigEntryState
 from homeassistant.core import HomeAssistant, ServiceCall, ServiceResponse, SupportsResponse, callback
 from homeassistant.exceptions import HomeAssistantError, ServiceValidationError
 from homeassistant.helpers import config_validation as cv
+from homeassistant.util import dt as dt_util
 
 from .client import StewardClient, StewardError
 from .const import DOMAIN
 
 ATTR_PRODUCT = "product"
 ATTR_AMOUNT = "amount"
+OCCASIONS = ["home", "comfort", "going_out", "work", "sport", "formal"]
+SCAN_MODES = ["purchase", "consume", "open", "spoil", "shopping", "lookup"]
 
 
 def _runtime(hass: HomeAssistant):
@@ -50,6 +53,22 @@ def _chore_id(hass: HomeAssistant, value: str | int) -> int:
     if match is None:
         raise ServiceValidationError(f"No chore called '{value}'")
     return match["id"]
+
+
+def _garment_ids(hass: HomeAssistant, values: list[str | int]) -> list[int]:
+    garments = _runtime(hass).coordinator.data.garments
+    ids = []
+    for value in values:
+        if isinstance(value, int) or str(value).isdigit():
+            ids.append(int(value))
+            continue
+        wanted = str(value).strip().casefold()
+        match = next((g for g in garments if g["name"].casefold() == wanted), None)
+        match = match or next((g for g in garments if wanted in g["name"].casefold()), None)
+        if match is None:
+            raise ServiceValidationError(f"No piece of clothing called '{value}'")
+        ids.append(match["id"])
+    return ids
 
 
 def _actor(call: ServiceCall) -> str | None:
@@ -127,6 +146,112 @@ def async_setup_services(hass: HomeAssistant) -> None:
             ]
         }
 
+    async def wear(call: ServiceCall) -> None:
+        payload = {"garment_ids": _garment_ids(hass, call.data["garments"])}
+        if day := call.data.get("date"):
+            payload["day"] = day.isoformat()
+        await _run(hass, client().post("api/wardrobe/wear", payload))
+
+    async def laundry_done(call: ServiceCall) -> ServiceResponse:
+        garments = call.data.get("garments")
+        payload = {"garment_ids": _garment_ids(hass, garments)} if garments else {}
+        return await _run(hass, client().post("api/wardrobe/laundry/done", payload))
+
+    async def search_manuals(call: ServiceCall) -> ServiceResponse:
+        try:
+            hits = await client().get("api/equipment/search", q=call.data["query"], limit=call.data.get("limit", 5))
+        except StewardError as err:
+            raise HomeAssistantError(str(err)) from err
+        return {"results": hits}
+
+    async def suggest_outfit(call: ServiceCall) -> ServiceResponse:
+        payload: dict[str, Any] = {
+            "owner": call.data.get("person"),
+            "occasion": call.data.get("occasion", "comfort"),
+            "count": call.data.get("count", 1),
+            "lang": hass.config.language,
+        }
+        if day := call.data.get("date"):
+            payload["day"] = day.isoformat()
+        outfits = await _run(hass, client().post("api/wardrobe/suggest", payload, timeout_total=180))
+        names = {g["id"]: g["name"] for g in _runtime(hass).coordinator.data.garments}
+        return {
+            "outfits": [
+                {
+                    "id": o["id"],
+                    "pieces": [names.get(i, str(i)) for i in o["garment_ids"]],
+                    "reason": o["reason"],
+                    "source": o["source"],
+                    "image": f"api/wardrobe/outfits/{o['id']}/image",
+                }
+                for o in outfits
+            ],
+            "weather": outfits[0]["weather"] if outfits else None,
+        }
+
+    async def wear_outfit(call: ServiceCall) -> None:
+        await _run(hass, client().post(f"api/wardrobe/outfits/{call.data['outfit_id']}/wear"))
+
+    async def scan(call: ServiceCall) -> ServiceResponse:
+        payload = {"code": call.data["code"], "mode": call.data.get("mode", "purchase")}
+        if (amount := call.data.get("amount")) is not None:
+            payload["amount"] = amount
+        result = await _run(hass, client().post("api/scan", payload, actor=_actor(call)))
+        return {
+            key: result.get(key)
+            for key in ("code", "mode", "done", "product_id", "product_name", "amount", "due_date", "source", "suggestion")
+        }
+
+    async def recognize(call: ServiceCall) -> ServiceResponse:
+        files: list[tuple[str, bytes, str]] = []
+        if camera_entity := call.data.get("camera"):
+            from homeassistant.components import camera as camera_component
+
+            image = await camera_component.async_get_image(hass, camera_entity)
+            files.append(("camera.jpg", image.content, image.content_type))
+        for path in call.data.get("paths") or []:
+            if not hass.config.is_allowed_path(path):
+                raise ServiceValidationError(f"{path} is not in allowlist_external_dirs")
+            data = await hass.async_add_executor_job(Path(path).read_bytes)
+            files.append((Path(path).name, data, "image/jpeg"))
+        if not files:
+            raise ServiceValidationError("Give a camera or at least one image path")
+        fields = {"hint": call.data["hint"]} if call.data.get("hint") else {}
+        try:
+            return await client().upload("api/scan/photo", files, **fields)
+        except StewardError as err:
+            raise HomeAssistantError(str(err)) from err
+
+    async def suggest_recipes(call: ServiceCall) -> ServiceResponse:
+        try:
+            ranked = await client().get("api/recipes/suggestions", limit=call.data.get("limit", 5))
+        except StewardError as err:
+            raise HomeAssistantError(str(err)) from err
+        return {
+            "recipes": [
+                {
+                    "name": s["recipe"]["name"],
+                    "can_cook": s["fulfillment"]["can_cook"],
+                    "missing": [i["name"] for i in s["fulfillment"]["ingredients"] if i["status"] in ("missing", "partial")],
+                    "uses_expiring": [i["product_name"] for i in s["fulfillment"]["ingredients"] if i["expiring"]],
+                    "minutes": s["recipe"]["minutes"],
+                }
+                for s in ranked
+            ]
+        }
+
+    async def complete_meal(call: ServiceCall) -> None:
+        meal_id = call.data.get("meal_id")
+        if meal_id is None:
+            today = dt_util.now().date().isoformat()
+            slot = call.data.get("slot", "dinner")
+            meal = next((m for m in _runtime(hass).coordinator.data.meal_plan if m["day"] == today and m["slot"] == slot), None)
+            if meal is None:
+                raise ServiceValidationError(f"Nothing planned for {slot} today")
+            meal_id = meal["id"]
+        cook = "true" if call.data.get("consume", True) else "false"
+        await _run(hass, client().post(f"api/mealplan/{meal_id}/done?cook={cook}", actor=_actor(call)))
+
     product = vol.Any(cv.positive_int, cv.string)
     hass.services.async_register(
         DOMAIN,
@@ -177,6 +302,93 @@ def async_setup_services(hass: HomeAssistant) -> None:
         import_receipt,
         vol.Schema({vol.Required("path"): cv.string}),
         supports_response=SupportsResponse.OPTIONAL,
+    )
+    hass.services.async_register(
+        DOMAIN,
+        "wear",
+        wear,
+        vol.Schema(
+            {
+                vol.Required("garments"): vol.All(cv.ensure_list, [vol.Any(cv.positive_int, cv.string)]),
+                vol.Optional("date"): cv.date,
+            }
+        ),
+    )
+    hass.services.async_register(
+        DOMAIN,
+        "laundry_done",
+        laundry_done,
+        vol.Schema({vol.Optional("garments"): vol.All(cv.ensure_list, [vol.Any(cv.positive_int, cv.string)])}),
+        supports_response=SupportsResponse.OPTIONAL,
+    )
+    hass.services.async_register(
+        DOMAIN,
+        "search_manuals",
+        search_manuals,
+        vol.Schema({vol.Required("query"): cv.string, vol.Optional("limit", default=5): vol.All(int, vol.Range(1, 20))}),
+        supports_response=SupportsResponse.ONLY,
+    )
+    hass.services.async_register(
+        DOMAIN,
+        "suggest_outfit",
+        suggest_outfit,
+        vol.Schema(
+            {
+                vol.Optional("person"): cv.entity_id,
+                vol.Optional("occasion", default="comfort"): vol.In(OCCASIONS),
+                vol.Optional("date"): cv.date,
+                vol.Optional("count", default=1): vol.All(int, vol.Range(1, 5)),
+            }
+        ),
+        supports_response=SupportsResponse.OPTIONAL,
+    )
+    hass.services.async_register(
+        DOMAIN, "wear_outfit", wear_outfit, vol.Schema({vol.Required("outfit_id"): cv.positive_int})
+    )
+    hass.services.async_register(
+        DOMAIN,
+        "scan",
+        scan,
+        vol.Schema(
+            {
+                vol.Required("code"): cv.string,
+                vol.Optional("mode", default="purchase"): vol.In(SCAN_MODES),
+                vol.Optional(ATTR_AMOUNT): vol.Coerce(float),
+            }
+        ),
+        supports_response=SupportsResponse.OPTIONAL,
+    )
+    hass.services.async_register(
+        DOMAIN,
+        "recognize",
+        recognize,
+        vol.Schema(
+            {
+                vol.Optional("camera"): cv.entity_id,
+                vol.Optional("paths"): vol.All(cv.ensure_list, [cv.string]),
+                vol.Optional("hint"): cv.string,
+            }
+        ),
+        supports_response=SupportsResponse.ONLY,
+    )
+    hass.services.async_register(
+        DOMAIN,
+        "suggest_recipes",
+        suggest_recipes,
+        vol.Schema({vol.Optional("limit", default=5): vol.All(int, vol.Range(1, 20))}),
+        supports_response=SupportsResponse.ONLY,
+    )
+    hass.services.async_register(
+        DOMAIN,
+        "complete_meal",
+        complete_meal,
+        vol.Schema(
+            {
+                vol.Optional("meal_id"): cv.positive_int,
+                vol.Optional("slot", default="dinner"): vol.In(["breakfast", "lunch", "dinner", "snack"]),
+                vol.Optional("consume", default=True): cv.boolean,
+            }
+        ),
     )
     hass.services.async_register(
         DOMAIN,

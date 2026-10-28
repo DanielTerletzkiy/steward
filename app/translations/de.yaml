@@ -1,0 +1,12 @@
+configuration:
+  log_level:
+    name: Log-Level
+    description: Wie ausführlich die App protokolliert.
+  demo_data:
+    name: Beispieldaten
+    description: Füllt eine leere Datenbank mit Beispielprodukten, Hausarbeiten, Geräten und Kleidung.
+  home_assistant_url:
+    name: Home-Assistant-URL
+    description: Nur für den direkten Zugriff über den Port oben. Die Adresse, unter der dein Browser Home Assistant erreicht, für „Mit Home Assistant anmelden“.
+network:
+  8095/tcp: Web-Oberfläche und API ohne Ingress

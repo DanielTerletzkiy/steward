@@ -1,0 +1,33 @@
+# Home Assistant app manifest. Build the installable folder with dev/scripts/build_app.sh.
+name: Steward
+version: "0.1.0"
+slug: steward
+description: Household management for Home Assistant - stock, shopping, chores, receipts, equipment and wardrobe
+arch:
+  - aarch64
+  - amd64
+startup: application
+boot: auto
+# The web UI opens in HA's sidebar through ingress, signed in as the HA user.
+ingress: true
+ingress_port: 8095
+panel_icon: mdi:home-heart
+panel_title: Steward
+# Supervisor API: announce the server so HA offers to set up the integration ("Discovered").
+hassio_api: true
+discovery:
+  - steward
+# Optional direct access (kiosk tablets, other machines): off unless you set a host port.
+ports:
+  8095/tcp: null
+ports_description:
+  8095/tcp: Web UI and API without ingress (sign-in with Home Assistant)
+map:
+  - share:ro
+options:
+  log_level: info
+  demo_data: false
+schema:
+  log_level: list(debug|info|warning|error)
+  demo_data: bool
+  home_assistant_url: url?

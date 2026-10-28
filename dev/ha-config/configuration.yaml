@@ -15,3 +15,55 @@ logger:
   default: info
   logs:
     custom_components.steward: debug
+
+# Simulated appliances, so the demo can show linked equipment without real hardware.
+# The washer's states are LG ThinQ's ("current_state"); flip them under Settings → Helpers.
+input_select:
+  demo_washer_state:
+    name: Demo washer state
+    options: [power_off, initial, detecting, running, rinsing, spinning, end]
+  demo_robot_state:
+    name: Demo robot state
+    options: [docked, cleaning, paused, returning, idle]
+
+input_number:
+  demo_washer_remaining:
+    name: Demo washer remaining
+    min: 0
+    max: 240
+    step: 1
+    unit_of_measurement: min
+
+template:
+  - sensor:
+      - name: Demo washer current state
+        unique_id: demo_washer_current_state
+        state: "{{ states('input_select.demo_washer_state') }}"
+      - name: Demo washer remaining time
+        unique_id: demo_washer_remaining_time
+        device_class: duration
+        unit_of_measurement: min
+        state: "{{ states('input_number.demo_washer_remaining') | int(0) }}"
+  - vacuum:
+      - name: Demo robot
+        unique_id: demo_robot
+        state: "{{ states('input_select.demo_robot_state') }}"
+        start:
+          - action: input_select.select_option
+            target: {entity_id: input_select.demo_robot_state}
+            data: {option: cleaning}
+        pause:
+          - action: input_select.select_option
+            target: {entity_id: input_select.demo_robot_state}
+            data: {option: paused}
+        return_to_base:
+          - action: input_select.select_option
+            target: {entity_id: input_select.demo_robot_state}
+            data: {option: returning}
+          - delay: 5
+          - action: input_select.select_option
+            target: {entity_id: input_select.demo_robot_state}
+            data: {option: docked}
+        locate:
+          - action: logbook.log
+            data: {name: Demo robot, message: "beep beep"}

@@ -123,7 +123,7 @@ const expanded = ref<number | null>(null)
 </script>
 
 <template>
-  <div class="page">
+  <div class="page has-fab">
     <div class="d-flex align-center mb-4">
       <div>
         <div class="page-title">{{ t.stock.title }}</div>
@@ -240,5 +240,6 @@ const expanded = ref<number | null>(null)
 
     <PurchaseDialog v-model="purchaseOpen" :product="purchaseFor" />
     <ProductDialog v-model="editOpen" :product="editFor" />
+    <v-btn class="scan-fab" color="primary" size="large" rounded="lg" elevation="4" prepend-icon="mdi-barcode-scan" to="/scan" height="56">{{ t.nav.scan }}</v-btn>
   </div>
 </template>

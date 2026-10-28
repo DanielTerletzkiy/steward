@@ -13,11 +13,21 @@ from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 
 from . import API_VERSION, __version__
+from . import supervisor
 from .api import is_authorized, router
+from .auth import router as auth_router
 from .config import Settings, load_settings
 from .db import Database
 from .events import EventHub
+from .ha_bridge import HABridge
+from .routes import equipment as equipment_routes
+from .routes import files as file_routes
+from .routes import recipes as recipe_routes
+from .routes import scan as scan_routes
+from .routes import settings as settings_routes
+from .routes import wardrobe as wardrobe_routes
 from .services import ServiceError
+from .services.files import FileStore
 
 LOG = logging.getLogger("steward")
 STATIC_DIR = Path(__file__).parent / "static"
@@ -31,17 +41,23 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         db = Database(settings.db_url)
         await db.create_all()
         app.state.settings, app.state.db, app.state.hub = settings, db, EventHub()
+        app.state.files = FileStore(settings.data_dir)
+        app.state.bridge = HABridge()
         if settings.seed_demo:
             from .seed import seed_demo
 
             async with db.sessions() as session:
-                await seed_demo(session, app.state.hub, settings.demo_receipts_dir)
+                await seed_demo(session, app.state.hub, app.state.files, settings.demo_receipts_dir)
         LOG.info("Steward %s ready, data in %s", __version__, settings.data_dir)
+        await supervisor.announce(settings)
         yield
         await db.dispose()
 
     app = FastAPI(title="Steward", version=__version__, lifespan=lifespan)
     app.include_router(router)
+    app.include_router(auth_router)
+    for module in (file_routes, equipment_routes, wardrobe_routes, scan_routes, settings_routes, recipe_routes):
+        app.include_router(module.router)
 
     @app.exception_handler(ServiceError)
     async def service_error(_request: Request, exc: ServiceError) -> JSONResponse:
@@ -50,15 +66,17 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     @app.websocket("/api/ws")
     async def events(websocket: WebSocket) -> None:
         host = websocket.client.host if websocket.client else None
+        await websocket.accept()
         if not is_authorized(websocket.headers, host, websocket.query_params.get("token"), settings):
+            # Accept first: a close before the handshake reaches the browser as 1006, not 4401.
             await websocket.close(code=4401)
             return
-        await websocket.accept()
         hub: EventHub = websocket.app.state.hub
         queue = hub.subscribe()
         await websocket.send_json({"type": "hello", "version": __version__, "api_version": API_VERSION})
-        # Clients only listen; this task notices when they hang up.
-        receiver = asyncio.create_task(_drain(websocket))
+        # Clients mostly listen. The HA integration also answers requests from the server (HABridge).
+        bridge: HABridge = websocket.app.state.bridge
+        receiver = asyncio.create_task(_receive(websocket, bridge, queue))
         try:
             while not receiver.done():
                 getter = asyncio.create_task(queue.get())
@@ -71,6 +89,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             pass
         finally:
             hub.unsubscribe(queue)
+            bridge.unregister(queue)
             receiver.cancel()
             with contextlib.suppress(asyncio.CancelledError):
                 await receiver
@@ -89,19 +108,28 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     return app
 
 
-async def _drain(websocket: WebSocket) -> None:
+async def _receive(websocket: WebSocket, bridge: HABridge, queue: asyncio.Queue) -> None:
     with contextlib.suppress(WebSocketDisconnect):
         while True:
             message = await websocket.receive_json()
-            if message.get("type") == "ping":
-                await websocket.send_json({"type": "pong"})
+            kind = message.get("type")
+            if kind == "ping":
+                queue.put_nowait({"type": "pong"})
+            elif kind == "ha_hello":
+                bridge.register(queue, message.get("capabilities") or [], message.get("info") or {})
+                LOG.info("Home Assistant connected (%s)", ", ".join(message.get("capabilities") or []) or "no extras")
+                websocket.app.state.hub.publish("settings", key="home_assistant")
+            elif kind == "ha_response":
+                bridge.resolve(message)
 
 
 def run() -> None:
     import uvicorn
 
-    logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
-    uvicorn.run(create_app(), host="0.0.0.0", port=8095, proxy_headers=False)
+    settings = load_settings()
+    level = getattr(logging, settings.log_level.upper(), logging.INFO)
+    logging.basicConfig(level=level, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
+    uvicorn.run(create_app(settings), host="0.0.0.0", port=8095, proxy_headers=False, log_level=settings.log_level.lower())
 
 
 if __name__ == "__main__":
