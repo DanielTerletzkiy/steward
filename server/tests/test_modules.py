@@ -88,6 +88,9 @@ async def test_wearing_moves_pieces_to_laundry_and_washing_resets(session, hub):
     worn = {g.name: g.state for g in await wardrobe.wear(session, hub, [tee, jeans, shoes])}
     assert worn == {"Tee": "laundry", "Jeans": "worn", "Sneakers": "worn"}
     assert await wardrobe.laundry_done(session, hub) == 1
+    washed = await wardrobe.get_garment(session, tee)
+    assert (washed.state, washed.wears_since_wash) == ("drying", 0)  # dries for a day before it's suggested
+    assert await wardrobe.dried(session, hub, [tee]) == 1
     assert (await wardrobe.get_garment(session, tee)).state == "clean"
 
 
@@ -238,3 +241,52 @@ async def test_suggestions_vary(session, hub):
     await closet(session, hub)
     first, second, *_ = outfits.rules_outfits(await wardrobe.list_garments(session), await context(session, 8, 14), 3)
     assert len(outfits._main(first) ^ outfits._main(second)) >= 4  # two pieces swapped
+
+
+async def test_ask_pieces_stop_being_suggested_until_washed_or_still_fine(session, hub):
+    ids = await closet(session, hub)  # jeans: 6 wears, category default "ask"
+    jeans = await wardrobe.get_garment(session, ids["Jeans"])
+    assert jeans.laundry_mode_effective == "ask"
+    for _ in range(6):
+        await wardrobe.wear(session, hub, [jeans.id])
+    jeans = await wardrobe.get_garment(session, jeans.id)
+    assert (jeans.state, jeans.needs_wash) == ("worn", True)
+    assert jeans.id not in {g.id for g in outfits.available(await wardrobe.list_garments(session))}
+    await wardrobe.still_fine(session, hub, [jeans.id], wears=2)
+    assert not (await wardrobe.get_garment(session, jeans.id)).needs_wash
+    await wardrobe.wear(session, hub, [jeans.id])
+    await wardrobe.wear(session, hub, [jeans.id])
+    assert (await wardrobe.get_garment(session, jeans.id)).needs_wash
+
+
+async def test_socks_go_to_the_laundry_and_are_never_in_outfits(session, hub):
+    socks = await wardrobe.create_garment(session, hub, GarmentIn(name="Socks", category="socks"))
+    assert (socks.layer, socks.laundry_mode_effective) == ("underwear", "auto")
+    assert socks.id not in {g.id for g in outfits.available([socks])}
+    [worn] = await wardrobe.wear(session, hub, [socks.id])
+    assert worn.state == "laundry"
+
+
+async def test_washing_cycle_and_drying_time(session, hub):
+    from datetime import timedelta
+
+    from steward_server.services import settings as settings_store
+    from steward_server.timeutil import utcnow
+
+    tee = await wardrobe.create_garment(session, hub, GarmentIn(name="Tee", category="t-shirt"))
+    await wardrobe.wear(session, hub, [tee.id])
+    assert await wardrobe.start_wash(session, hub) == 1
+    assert (await wardrobe.get_garment(session, tee.id)).state == "washing"
+    await wardrobe.washed(session, hub)
+    tee = await wardrobe.get_garment(session, tee.id)
+    assert tee.state == "drying" and tee.dry_until is not None
+    assert await wardrobe.release_dried(session, hub) == 0  # still wet
+    tee.dry_until = utcnow() - timedelta(minutes=1)
+    await session.commit()
+    assert await wardrobe.release_dried(session, hub) == 1
+    # "Until I mark them dry": no automatic release.
+    await settings_store.put(session, hub, wardrobe.SETTINGS_KEY, {"drying_hours": None})
+    await wardrobe.wear(session, hub, [tee.id])
+    await wardrobe.washed(session, hub)
+    tee = await wardrobe.get_garment(session, tee.id)
+    assert (tee.state, tee.dry_until) == ("drying", None)

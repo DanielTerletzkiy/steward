@@ -229,6 +229,9 @@ export interface Summary {
     /** Keyed by owner id, '' = household. */
     outfits_today: Record<string, { id: number; garment_ids: number[]; worn: boolean; source: OutfitSource; reason: string | null }>
     laundry_prompt: LaundryPrompt | null
+    needs_wash: { id: number; name: string }[]
+    washing: number
+    drying: { id: number; name: string; dry_until: string | null }[]
   }
 }
 
@@ -370,11 +373,13 @@ export interface ManualHit {
 
 // --- wardrobe
 
-export type GarmentState = 'clean' | 'worn' | 'laundry' | 'repair' | 'lent' | 'stored'
+export type GarmentState = 'clean' | 'worn' | 'laundry' | 'washing' | 'drying' | 'repair' | 'lent' | 'stored'
+export type LaundryMode = 'auto' | 'ask'
 export type OutfitSource = 'manual' | 'rules' | 'ai'
 
 export interface WardrobeVocabulary {
-  categories: { name: string; layer: string; wears_per_wash: number }[]
+  categories: { name: string; layer: string; wears_per_wash: number; laundry_mode: LaundryMode }[]
+  laundry_modes: LaundryMode[]
   layers: string[]
   states: GarmentState[]
   rain: string[]
@@ -406,6 +411,7 @@ export interface GarmentIn {
   favorite?: boolean
   notes?: string | null
   wears_per_wash?: number | null
+  laundry_mode?: LaundryMode | null
 }
 
 export interface Garment {
@@ -437,6 +443,15 @@ export interface Garment {
   wear_count: number
   last_worn: string | null
   cost_per_wear: number | null
+  /** null = the category's default */
+  laundry_mode: LaundryMode | null
+  laundry_mode_effective: LaundryMode
+  extra_wears: number
+  /** Worn as often as it should be between washes, but not in the laundry yet. */
+  needs_wash: boolean
+  washed_at: string | null
+  /** While drying: when it counts as dry; null = until marked dry. */
+  dry_until: string | null
 }
 
 export interface Outfit {

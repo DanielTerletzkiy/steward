@@ -9,7 +9,7 @@ import { label, swatch, useVocabulary } from '@/composables/wardrobe'
 import PhotoPicker from './PhotoPicker.vue'
 import AiProblemAlert from './AiProblemAlert.vue'
 import { aiProblem, type AiProblem } from '@/composables/aiErrors'
-import type { Garment, GarmentIn } from '@/types'
+import type { Garment, GarmentIn, LaundryMode } from '@/types'
 
 const open = defineModel<boolean>({ default: false })
 const props = defineProps<{ garment?: Garment | null; defaultOwner?: string | null }>()
@@ -41,6 +41,7 @@ const blank = () => ({
   favorite: false,
   notes: '',
   wears_per_wash: '' as string | number,
+  laundry_mode: '__default' as LaundryMode | '__default',
   owner: null as string | null,
 })
 const form = ref(blank())
@@ -85,6 +86,7 @@ watch(open, (v) => {
     favorite: g.favorite,
     notes: g.notes ?? '',
     wears_per_wash: g.wears_per_wash,
+    laundry_mode: g.laundry_mode ?? '__default',
     owner: g.owner,
   }
 })
@@ -99,6 +101,13 @@ const categoryItems = computed(() => {
     .map((c) => ({ value: c.name, title: label.category(c.name), subtitle: label.layer(c.layer) }))
 })
 const patternItems = computed(() => (vocab.value?.patterns ?? []).map((p) => ({ value: p, title: label.pattern(p) })))
+const laundryItems = computed(() => {
+  const info = categoryInfo.value
+  const fallback = info
+    ? t.wardrobe.laundryModeDefault(label.category(info.name), t.wardrobe.laundryModes[info.laundry_mode])
+    : t.wardrobe.laundryModeDefaultPlain
+  return [{ value: '__default', title: fallback }, ...(vocab.value?.laundry_modes ?? ['auto', 'ask']).map((m) => ({ value: m, title: t.wardrobe.laundryModes[m] ?? m }))]
+})
 const ownerItems = computed(() => [{ value: null, title: t.wardrobe.household }, ...state.people.map((p) => ({ value: p.id, title: p.name }))])
 const suggestedName = computed(() => {
   const f = form.value
@@ -182,6 +191,7 @@ async function save() {
     price: num(f.price),
     favorite: f.favorite,
     notes: f.notes.trim() || null,
+    laundry_mode: f.laundry_mode === '__default' ? null : f.laundry_mode,
     wears_per_wash: wpw == null ? (isEdit.value ? categoryInfo.value?.wears_per_wash ?? null : null) : Math.max(0, Math.round(wpw)),
   }
   if (body.wears_per_wash == null) delete body.wears_per_wash
@@ -332,6 +342,16 @@ async function save() {
                 :placeholder="categoryInfo ? String(categoryInfo.wears_per_wash) : ''"
                 :hint="categoryInfo ? t.wardrobe.wearsPerWashHint(categoryInfo.wears_per_wash) : undefined"
                 persistent-hint
+              />
+            </v-col>
+            <v-col cols="12">
+              <v-select
+                v-model="form.laundry_mode"
+                :items="laundryItems"
+                :label="t.wardrobe.laundryMode"
+                :hint="t.wardrobe.laundryModeHint"
+                persistent-hint
+                prepend-inner-icon="mdi-basket-outline"
               />
             </v-col>
             <v-col v-if="state.people.length > 1" cols="12" sm="6">

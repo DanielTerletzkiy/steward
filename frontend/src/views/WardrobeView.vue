@@ -7,7 +7,7 @@ import { useResource } from '@/composables/resource'
 import { useCatalog } from '@/composables/catalog'
 import { attempt, notify } from '@/composables/notify'
 import { daysFromToday, formatShortDate, parseDay, relativeDay } from '@/composables/format'
-import { label, laundryDone, layerIcon, sourceIcon, stateColor, stateIcon, useVocabulary, wearToday } from '@/composables/wardrobe'
+import { label, layerIcon, sourceIcon, stateColor, stateIcon, useVocabulary, wearToday } from '@/composables/wardrobe'
 import EmptyState from '@/components/EmptyState.vue'
 import ConfirmDialog from '@/components/ConfirmDialog.vue'
 import GarmentThumb from '@/components/GarmentThumb.vue'
@@ -17,9 +17,10 @@ import OutfitCollage from '@/components/OutfitCollage.vue'
 import StyleProfileDialog from '@/components/StyleProfileDialog.vue'
 import TodayOutfitCard from '@/components/TodayOutfitCard.vue'
 import LaundryPromptBanner from '@/components/LaundryPromptBanner.vue'
-import type { Garment, Outfit, Summary } from '@/types'
+import LaundryPanel from '@/components/LaundryPanel.vue'
+import type { Equipment, Garment, Outfit, Summary } from '@/types'
 
-const { xs, smAndUp, mdAndUp, lgAndUp } = useDisplay()
+const { xs, smAndUp, mdAndUp } = useDisplay()
 const { state: catalog, personName } = useCatalog()
 const vocab = useVocabulary()
 
@@ -119,13 +120,10 @@ const filterMenus = computed(() => [
 ])
 
 // --- laundry
-const laundry = computed(() => garments.value.filter((g) => g.state === 'laundry'))
-const washing = ref(false)
-async function doLaundry() {
-  washing.value = true
-  await laundryDone(laundry.value)
-  washing.value = false
-}
+const laundry = computed(() => garments.value.filter((g) => g.state === 'laundry' || g.state === 'washing'))
+// A linked washer tells us when the laundry goes in; without one the user says so.
+const { data: equipment } = useResource<Equipment[]>(() => api.equipmentList(), ['equipment'], [])
+const hasWasher = computed(() => equipment.value.some((e) => e.kind === 'washer' && (!!e.ha_device_id || e.ha_entities.length > 0)))
 
 // --- selection
 const selecting = ref(false)
@@ -245,33 +243,12 @@ const profileOpen = ref(false)
         <LaundryPromptBanner :prompt="laundryPrompt" :pieces="laundry" @changed="reloadSummary" />
       </v-col>
       <!-- Today's outfit with "Suggest an outfit" -->
-      <v-col cols="12" :lg="laundry.length ? 8 : 12">
+      <v-col cols="12" lg="8">
         <TodayOutfitCard :outfits="outfits" :garments="byId" :owner="ownerParam" @changed="reloadOutfits" />
       </v-col>
 
-      <v-col v-if="laundry.length" cols="12" lg="4">
-        <v-card variant="flat" border class="h-100 d-flex flex-column">
-          <v-card-item>
-            <template #prepend><v-avatar color="warning" variant="tonal"><v-icon icon="mdi-washing-machine" /></v-avatar></template>
-            <v-card-title class="text-subtitle-1 font-weight-medium">{{ t.wardrobe.laundry }}</v-card-title>
-            <v-card-subtitle class="text-wrap">{{ t.wardrobe.inLaundry(laundry.length) }}</v-card-subtitle>
-            <template v-if="!lgAndUp" #append>
-              <v-btn color="primary" variant="tonal" size="small" prepend-icon="mdi-check-all" :loading="washing" @click="doLaundry">{{ t.wardrobe.laundryDone }}</v-btn>
-            </template>
-          </v-card-item>
-          <template v-if="lgAndUp">
-            <div class="d-flex flex-wrap ga-1 px-4">
-              <div v-for="g in laundry.slice(0, 8)" :key="g.id" class="clickable" style="width: 40px" :title="g.name" @click="openDetail(g)">
-                <GarmentThumb :photo-id="g.photo_id" :layer="g.layer" :icon-size="18" rounded="md" />
-              </div>
-              <div v-if="laundry.length > 8" class="text-caption text-medium-emphasis align-self-center ml-1">+{{ laundry.length - 8 }}</div>
-            </div>
-            <v-spacer />
-            <v-card-actions class="px-4 pb-3">
-              <v-btn color="primary" variant="tonal" prepend-icon="mdi-check-all" :loading="washing" @click="doLaundry">{{ t.wardrobe.laundryDone }}</v-btn>
-            </v-card-actions>
-          </template>
-        </v-card>
+      <v-col cols="12" lg="4">
+        <LaundryPanel :garments="garments" :has-washer="hasWasher" @open="openDetail" />
       </v-col>
     </v-row>
 
@@ -359,7 +336,10 @@ const profileOpen = ref(false)
                   <div class="pa-2 pb-0 position-relative">
                     <GarmentThumb :photo-id="g.photo_id" :layer="g.layer" class="garment-card__img" />
                     <v-icon v-if="g.favorite" icon="mdi-heart" color="error" size="18" class="garment-card__fav" />
-                    <v-chip v-if="g.state !== 'clean'" :color="stateColor[g.state]" :prepend-icon="stateIcon[g.state]" variant="flat" size="x-small" class="garment-card__state">
+                    <v-chip v-if="g.needs_wash && (g.state === 'clean' || g.state === 'worn')" color="warning" prepend-icon="mdi-basket-plus-outline" variant="flat" size="x-small" class="garment-card__state">
+                      {{ t.wardrobe.needsWash }}
+                    </v-chip>
+                    <v-chip v-else-if="g.state !== 'clean'" :color="stateColor[g.state]" :prepend-icon="stateIcon[g.state]" variant="flat" size="x-small" class="garment-card__state">
                       {{ label.state(g.state) }}
                     </v-chip>
                     <v-icon v-if="selecting" :icon="selected.includes(g.id) ? 'mdi-check-circle' : 'mdi-circle-outline'" :color="selected.includes(g.id) ? 'primary' : undefined" size="24" class="garment-card__check" />

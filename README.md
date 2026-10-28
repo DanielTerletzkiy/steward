@@ -22,22 +22,18 @@ The plan and decisions are in [PLAN.md](PLAN.md).
 | `dev/` | Docker Compose demo (Home Assistant + Steward) and helper scripts |
 | `samples/ebons/` | Real REWE eBons for tests (git-ignored, personal data) |
 
-## Install on Home Assistant OS (as an app)
+## Install in your Home Assistant
 
-```bash
-dev/scripts/build_app.sh
-```
-
-This stages a self-contained app folder in `dist/ha-app/steward`. To install it:
-1. Copy that folder into HA's `/addons` share (with the Samba or SSH app).
-2. In HA, open Settings → Apps → App store → ⋮ → Check for updates.
-3. Install "Steward" from **Local apps**.
+See [INSTALL.md](INSTALL.md). In short:
+1. `dev/scripts/build_app.sh` stages the app in `dist/ha-app/steward`.
+2. Copy that folder to HA's `/addons` and `custom_components/steward` to `/config/custom_components`, over SSH.
+3. Install **Steward** from **Local apps**.
 
 The app:
 - opens in the sidebar through ingress, signed in as your HA user;
 - announces itself, so HA shows **Discovered: Steward** and the integration sets up in one click.
 
-`dev/scripts/build_app.sh --docker` also builds the image the way the Supervisor would. Installing straight from GitHub needs published images; that comes with CI once the repository is public.
+`dev/scripts/build_app.sh --docker` also builds the image the way the Supervisor would. HACS and the app store's "Add repository" need published images and a public repository (see INSTALL.md).
 
 ## Run the demo (HA Container + Docker)
 
@@ -70,6 +66,17 @@ Open Steward → Settings → AI to choose a provider for each job (scanning gro
 
 Without AI, everything still works: barcodes use Open Food Facts, and outfits come from the rule engine. The AI only adds photo recognition, clothing tags and taste.
 
+## Laundry
+
+- **Wear counts:** every piece has "wears before washing", from its category (t-shirts 1, jeans 6, sweaters 4, …).
+- **What happens at the count:**
+  - Socks, underwear and t-shirts go into the laundry automatically.
+  - Jeans, sweaters and the like ask first: they stop being suggested and appear under "Ready for the wash?" ("To the laundry" / "Still fine"). Each piece can override this.
+- **With a washer linked to HA:**
+  - Starting it means the laundry bin went in ("washing").
+  - Finishing means the clothes are drying. They aren't suggested for 24 h (configurable: right away, 12/24/48 h, or until you mark them dry). A linked dryer finishing marks them dry.
+- **Without a linked washer:** the same steps are buttons in the wardrobe.
+
 ## Appliances
 
 Link a piece of equipment to a Home Assistant device, or to single entities, in its detail page. Steward then:
@@ -82,7 +89,7 @@ Link a piece of equipment to a Home Assistant device, or to single entities, in 
 - **Reacts per appliance type:**
   - a vacuum run completes its linked chores (e.g. "Vacuum");
   - a washer, dryer or dishwasher makes its chores due (e.g. "Hang up the laundry");
-  - after a wash, Steward offers to mark the laundry as clean (or does it automatically).
+  - a washer moves the laundry bin through washing and drying (see Laundry), or asks you when it's done.
 - **Controls vacuums from Steward:** start, pause, dock, locate. Only the linked vacuum entity can be commanded.
 - **Fires `steward_appliance_finished` in HA** (with the appliance, the chores and the laundry outcome), for your own notifications.
 

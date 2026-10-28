@@ -50,7 +50,9 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                 await seed_demo(session, app.state.hub, app.state.files, settings.demo_receipts_dir)
         LOG.info("Steward %s ready, data in %s", __version__, settings.data_dir)
         await supervisor.announce(settings)
+        housekeeping = asyncio.create_task(_housekeeping(db, app.state.hub))
         yield
+        housekeeping.cancel()
         await db.dispose()
 
     app = FastAPI(title="Steward", version=__version__, lifespan=lifespan)
@@ -106,6 +108,19 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             return FileResponse(STATIC_DIR / "index.html")
 
     return app
+
+
+async def _housekeeping(db: Database, hub: EventHub) -> None:
+    """Small periodic jobs: drying clothes become available again."""
+    from .services import wardrobe
+
+    while True:
+        try:
+            async with db.sessions() as session:
+                await wardrobe.release_dried(session, hub)
+        except Exception:  # noqa: BLE001 - keep the loop alive; the next round retries
+            LOG.exception("Housekeeping failed")
+        await asyncio.sleep(300)
 
 
 async def _receive(websocket: WebSocket, bridge: HABridge, queue: asyncio.Queue) -> None:

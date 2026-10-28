@@ -160,6 +160,8 @@ GARMENTS = [
     ("Running shoes", "sneakers", "orange", 2, (0, 30), "none", False, 1, ["sport"], ["summer", "transition", "winter"], "clean", 50, 120.0),
     ("Grey wool scarf", "scarf", "grey", 4, (-10, 8), "none", True, 2, ["going_out", "work", "comfort"], ["winter"], "clean", 12, 39.0),
     ("Black beanie", "hat", "black", 4, (-10, 6), "none", True, 1, ["comfort", "going_out"], ["winter"], "clean", 9, 19.0),
+    ("Everyday socks", "socks", "black", 1, (-10, 35), "none", False, 1, [], [], "laundry", 80, 12.0),
+    ("Boxer briefs", "underwear", "navy", 1, (-10, 35), "none", False, 1, [], [], "clean", 70, 20.0),
 ]
 
 

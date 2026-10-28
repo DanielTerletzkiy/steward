@@ -73,9 +73,11 @@ const choreItems = computed(() => [
   { value: '__default', title: t.appliances.byDefault(t.appliances.chores[defaults.value.chores]) },
   ...(['complete', 'make_due', 'off'] as const).map((v) => ({ value: v, title: t.appliances.chores[v] })),
 ])
+const isDryer = computed(() => props.equipment.kind === 'dryer')
+const laundryLabel = (v: string) => (isDryer.value ? t.appliances.dryerModes[v] : t.appliances.laundryModes[v]) ?? v
 const laundryItems = computed(() => [
-  { value: '__default', title: t.appliances.byDefault(t.appliances.laundryModes[defaults.value.laundry]) },
-  ...(['ask', 'auto', 'off'] as const).map((v) => ({ value: v, title: t.appliances.laundryModes[v] })),
+  { value: '__default', title: t.appliances.byDefault(laundryLabel(defaults.value.laundry)) },
+  ...(isDryer.value ? (['auto', 'off'] as const) : (['auto', 'ask', 'off'] as const)).map((v) => ({ value: v, title: laundryLabel(v) })),
 ])
 async function setAutomation(key: 'chores' | 'laundry', value: string) {
   const next = { ...props.equipment.automation } as Record<string, string>
@@ -83,7 +85,7 @@ async function setAutomation(key: 'chores' | 'laundry', value: string) {
   else next[key] = value
   await save({ automation: next as EquipmentIn['automation'] })
 }
-const showLaundry = computed(() => props.equipment.kind === 'washer' || props.equipment.automation.laundry != null)
+const showLaundry = computed(() => ['washer', 'dryer'].includes(props.equipment.kind) || props.equipment.automation.laundry != null)
 </script>
 
 <template>

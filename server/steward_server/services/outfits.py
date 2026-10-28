@@ -123,7 +123,8 @@ def harmony(pieces: list[Garment]) -> float:
 
 
 def available(garments: list[Garment]) -> list[Garment]:
-    return [g for g in garments if g.state in AVAILABLE]
+    """Clean or worn-but-fine pieces; never ones that need washing, are drying or are underwear."""
+    return [g for g in garments if g.state in AVAILABLE and not g.needs_wash and g.layer != "underwear"]
 
 
 def by_slot(garments: list[Garment], ctx: Context) -> dict[str, list[Garment]]:
@@ -236,6 +237,7 @@ async def suggest(
     if occasion not in OCCASIONS:
         raise Invalid(f"occasion must be one of: {', '.join(OCCASIONS)}")
     day = day or today()
+    await wardrobe.release_dried(session, hub)
     if weather is None:
         weather = await weather_service.for_day(session, bridge, day)
     profile = await wardrobe.get_profile(session, owner)

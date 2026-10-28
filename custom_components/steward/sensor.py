@@ -131,7 +131,12 @@ SENSORS: tuple[StewardSensorDescription, ...] = (
         icon="mdi:basket-outline",
         state_class=SensorStateClass.MEASUREMENT,
         value=lambda d: d.summary["wardrobe"]["laundry"],
-        attributes=lambda d: {"pieces": [g["name"] for g in d.garments if g["state"] == "laundry"]},
+        attributes=lambda d: {
+            "pieces": [g["name"] for g in d.garments if g["state"] == "laundry"],
+            "needs_wash": [g["name"] for g in d.garments if g.get("needs_wash")],
+            "washing": [g["name"] for g in d.garments if g["state"] == "washing"],
+            "drying": [g["name"] for g in d.garments if g["state"] == "drying"],
+        },
     ),
 )
 

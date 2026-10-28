@@ -96,6 +96,11 @@ async def set_live(session: Session, hub: Hub, equipment_id: int, body: LiveIn) 
     await equipment.set_live(session, hub, equipment_id, body)
 
 
+@router.post("/equipment/{equipment_id}/started")
+async def started(session: Session, hub: Hub, equipment_id: int) -> dict:
+    return await equipment.started(session, hub, equipment_id)
+
+
 @router.post("/equipment/{equipment_id}/finished")
 async def finished(session: Session, hub: Hub, equipment_id: int, body: FinishedIn) -> dict:
     return await equipment.finished(session, hub, equipment_id, body)

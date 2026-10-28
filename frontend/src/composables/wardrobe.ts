@@ -42,15 +42,16 @@ const SWATCH: Record<string, string> = {
 export const swatch = (color: string) => SWATCH[color] ?? '#9e9e9e'
 
 export const stateColor: Record<string, string> = {
-  clean: 'success', worn: 'info', laundry: 'warning', repair: 'error', lent: 'secondary', stored: 'grey',
+  clean: 'success', worn: 'info', laundry: 'warning', washing: 'info', drying: 'secondary', repair: 'error', lent: 'secondary', stored: 'grey',
 }
 export const stateIcon: Record<string, string> = {
-  clean: 'mdi-check-circle-outline', worn: 'mdi-tshirt-crew-outline', laundry: 'mdi-washing-machine', repair: 'mdi-needle',
+  clean: 'mdi-check-circle-outline', worn: 'mdi-tshirt-crew-outline', laundry: 'mdi-basket-outline', washing: 'mdi-washing-machine',
+  drying: 'mdi-weather-windy', repair: 'mdi-needle',
   lent: 'mdi-account-arrow-right-outline', stored: 'mdi-archive-outline',
 }
 export const layerIcon: Record<string, string> = {
   base: 'mdi-tshirt-crew-outline', mid: 'mdi-tshirt-v-outline', outer: 'mdi-coat-rack', bottom: 'mdi-human-male',
-  full: 'mdi-human-female', shoes: 'mdi-shoe-sneaker', accessory: 'mdi-hat-fedora',
+  full: 'mdi-human-female', shoes: 'mdi-shoe-sneaker', accessory: 'mdi-hat-fedora', underwear: 'mdi-underwear-outline',
 }
 export const sourceIcon: Record<string, string> = { manual: 'mdi-hand-back-right-outline', rules: 'mdi-lightbulb-outline', ai: 'mdi-creation' }
 
@@ -63,18 +64,21 @@ export async function wearToday(ids: number[]) {
   return true
 }
 
-/** Wash the given pieces, with an Undo that puts them back into the laundry exactly as they were. */
-export async function laundryDone(pieces: Pick<Garment, 'id' | 'state' | 'wears_since_wash'>[]) {
-  const before = pieces.map((g) => ({ id: g.id, state: g.state, wears_since_wash: g.wears_since_wash }))
-  const res = await attempt(() => api.laundryDone(before.length ? before.map((g) => g.id) : undefined))
-  if (!res) return false
-  notify(t.wardrobe.washedMsg(res.washed), {
+type Snapshot = Pick<Garment, 'id' | 'state' | 'wears_since_wash' | 'extra_wears' | 'dry_until'>
+const snapshot = (g: Snapshot) => ({ id: g.id, state: g.state, wears_since_wash: g.wears_since_wash, extra_wears: g.extra_wears, dry_until: g.dry_until })
+
+/** Run a laundry step, with an Undo that puts every piece back exactly as it was. */
+async function laundryStep(pieces: Snapshot[], call: () => Promise<number>, message: (n: number) => string) {
+  const before = pieces.map(snapshot)
+  const n = await attempt(call)
+  if (n === undefined) return false
+  notify(message(n), {
     action: before.length
       ? {
           label: t.common.undo,
           run: async () => {
             try {
-              await Promise.all(before.map((g) => api.updateGarment(g.id, { state: g.state, wears_since_wash: g.wears_since_wash })))
+              await Promise.all(before.map(({ id, ...rest }) => api.updateGarment(id, rest)))
               notify(t.common.undone)
             } catch (e) {
               notifyError(e)
@@ -86,10 +90,29 @@ export async function laundryDone(pieces: Pick<Garment, 'id' | 'state' | 'wears_
   return true
 }
 
+/** Into the laundry bin. */
+export const toLaundry = (pieces: Snapshot[]) =>
+  laundryStep(pieces, async () => (await api.laundryAdd(pieces.map((g) => g.id))).moved, t.wardrobe.movedMsg)
+
+/** "Still fine": a few more wears before asking again. */
+export const stillFine = (pieces: Snapshot[]) =>
+  laundryStep(pieces, async () => (await api.laundryStillFine(pieces.map((g) => g.id))).updated, t.wardrobe.stillFineMsg)
+
+/** The laundry bin went into the washer (no linked washer to tell us). `pieces` = what is in the bin, for Undo. */
+export const startWash = (pieces: Snapshot[]) => laundryStep(pieces, async () => (await api.laundryStart()).washing, t.wardrobe.startedMsg)
+
+/** Washed: the pieces go drying (or straight to clean, depending on the drying time). */
+export const laundryDone = (pieces: Snapshot[]) =>
+  laundryStep(pieces, async () => (await api.laundryDone(pieces.length ? pieces.map((g) => g.id) : undefined)).washed, t.wardrobe.washedOnlyMsg)
+
+/** Dry: back to clean. */
+export const markDry = (pieces: Snapshot[]) =>
+  laundryStep(pieces, async () => (await api.laundryDried(pieces.length ? pieces.map((g) => g.id) : undefined)).dried, t.wardrobe.driedMsg)
+
 /** Move a piece to another state, with an Undo back to the previous one. */
 export async function setGarmentState(g: Garment, state: GarmentState) {
   if (g.state === state) return
-  const previous = { state: g.state, wears_since_wash: g.wears_since_wash }
+  const { id: _id, ...previous } = snapshot(g)
   const res = await attempt(() => api.updateGarment(g.id, { state }))
   if (!res) return
   notify(t.wardrobe.stateMsg(g.name, label.state(state)), {

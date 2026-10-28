@@ -23,8 +23,8 @@ export const commandIcon: Record<string, string> = {
 
 /** The defaults the server applies per kind (shown as "Default: …"). Mirrors the server's AUTOMATION_DEFAULTS. */
 export const AUTOMATION_DEFAULTS: Record<string, { chores: string; laundry: string }> = {
-  washer: { chores: 'make_due', laundry: 'ask' },
-  dryer: { chores: 'make_due', laundry: 'off' },
+  washer: { chores: 'make_due', laundry: 'auto' },
+  dryer: { chores: 'make_due', laundry: 'auto' },
   dishwasher: { chores: 'make_due', laundry: 'off' },
   vacuum: { chores: 'complete', laundry: 'off' },
   other: { chores: 'off', laundry: 'off' },

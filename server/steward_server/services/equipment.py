@@ -241,19 +241,34 @@ async def finished(session: AsyncSession, hub: EventHub, equipment_id: int, data
             chore = await session.get(Chore, chore_id)
             if chore is not None:
                 result["chores_due"].append(chore.name)
-    in_laundry = await session.scalar(select(func.count()).select_from(Garment).where(Garment.state == "laundry"))
-    if in_laundry and rules["laundry"] == "auto":
-        from . import wardrobe
+    from . import wardrobe
 
-        await wardrobe.laundry_done(session, hub)
+    in_laundry = await session.scalar(
+        select(func.count()).select_from(Garment).where(Garment.state.in_(("laundry", "washing")))
+    )
+    if item.kind == "dryer" and rules["laundry"] == "auto":
+        result["laundry"] = "dried" if await wardrobe.dried(session, hub) else None
+    elif in_laundry and rules["laundry"] == "auto" and item.kind == "washer":
+        await wardrobe.washed(session, hub)
         result["laundry"] = "washed"
-    elif in_laundry and rules["laundry"] == "ask":
+    elif in_laundry and rules["laundry"] == "ask" and item.kind == "washer":
         await settings_store.put(session, hub, LAUNDRY_PROMPT,
                                  {"equipment_id": item.id, "name": item.name, "at": now.isoformat(), "pieces": in_laundry})  # fmt: skip
         result["laundry"] = "asked"
     await session.commit()
     hub.publish("equipment", equipment_id=item.id)
     return result
+
+
+async def started(session: AsyncSession, hub: EventHub, equipment_id: int) -> dict[str, Any]:
+    """An appliance started a run. For a washer on "auto", the laundry bin is assumed to be in it."""
+    item = await get_equipment(session, equipment_id)
+    rules = item.automation_effective
+    if item.kind == "washer" and rules["laundry"] == "auto":
+        from . import wardrobe
+
+        return {"washing": await wardrobe.start_wash(session, hub)}
+    return {}
 
 
 async def runs(session: AsyncSession, equipment_id: int, limit: int = 20) -> list[EquipmentRun]:

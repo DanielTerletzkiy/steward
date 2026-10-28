@@ -133,7 +133,7 @@ export const api = {
   garments: (owner?: string | null) => get<Garment[]>(`wardrobe/garments${query({ owner })}`),
   garment: (id: number) => get<Garment>(`wardrobe/garments/${id}`),
   createGarment: (body: GarmentIn) => post<Garment>('wardrobe/garments', body),
-  updateGarment: (id: number, body: Partial<GarmentIn> & { state?: GarmentState; wears_since_wash?: number }) => patch<Garment>(`wardrobe/garments/${id}`, body),
+  updateGarment: (id: number, body: Partial<GarmentIn> & { state?: GarmentState; wears_since_wash?: number; extra_wears?: number; dry_until?: string | null }) => patch<Garment>(`wardrobe/garments/${id}`, body),
   deleteGarment: (id: number) => del(`wardrobe/garments/${id}`),
   setGarmentPhoto: (id: number, file: Blob) => put<Garment>(`wardrobe/garments/${id}/photo`, upload(file)),
   deleteGarmentPhoto: (id: number) => request<Garment>('DELETE', `wardrobe/garments/${id}/photo`),
@@ -206,4 +206,11 @@ export const api = {
   equipmentCommand: (id: number, command: string) =>
     post<{ result: { entity_id: string; state: string | null } }>(`equipment/${id}/command`, { command }),
   dismissLaundryPrompt: () => post<void>('wardrobe/laundry/dismiss'),
+
+  laundryAdd: (garment_ids: number[]) => post<{ moved: number }>('wardrobe/laundry/add', { garment_ids }),
+  laundryStillFine: (garment_ids: number[], wears?: number | null) => post<{ updated: number }>('wardrobe/laundry/still-fine', { garment_ids, wears: wears ?? null }),
+  laundryStart: () => post<{ washing: number }>('wardrobe/laundry/start'),
+  laundryDried: (garment_ids?: number[]) => post<{ dried: number }>('wardrobe/laundry/dried', { garment_ids: garment_ids ?? null }),
+  wardrobeSettings: () => get<{ drying_hours: number | null }>('wardrobe/settings'),
+  saveWardrobeSettings: (body: { drying_hours: number | null }) => put<{ drying_hours: number | null }>('wardrobe/settings', body),
 }

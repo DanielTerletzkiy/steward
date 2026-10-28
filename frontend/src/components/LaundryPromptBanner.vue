@@ -8,7 +8,7 @@ import { laundryDone } from '@/composables/wardrobe'
 import type { Garment, LaundryPrompt } from '@/types'
 
 // "The washing machine finished: mark the laundry clean?" Shown on Today and in the wardrobe.
-const props = defineProps<{ prompt: LaundryPrompt; pieces?: Pick<Garment, 'id' | 'state' | 'wears_since_wash'>[] }>()
+const props = defineProps<{ prompt: LaundryPrompt; pieces?: Garment[] }>()
 const emit = defineEmits<{ changed: [] }>()
 
 const when = computed(() => (daysFromToday(parseDateTime(props.prompt.at)) === 0 ? formatTime(props.prompt.at) : formatDateTime(props.prompt.at)))

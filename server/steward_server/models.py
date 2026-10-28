@@ -231,8 +231,9 @@ APPLIANCE_KINDS = ("washer", "dryer", "dishwasher", "vacuum", "other")
 # What a finished run does by default: complete the linked chores (the vacuum did it) or make them due
 # ("hang up the laundry"), and whether to offer marking the laundry as clean.
 AUTOMATION_DEFAULTS = {
-    "washer": {"chores": "make_due", "laundry": "ask"},
-    "dryer": {"chores": "make_due", "laundry": "off"},
+    # Washer laundry "auto": starting it means the laundry bin went in; finishing means it's drying.
+    "washer": {"chores": "make_due", "laundry": "auto"},
+    "dryer": {"chores": "make_due", "laundry": "auto"},
     "dishwasher": {"chores": "make_due", "laundry": "off"},
     "vacuum": {"chores": "complete", "laundry": "off"},
     "other": {"chores": "off", "laundry": "off"},
@@ -313,6 +314,12 @@ class EquipmentDocument(Base):
     file: Mapped[StoredFile] = relationship(lazy="selectin")
 
 
+# Categories that go straight into the laundry once worn enough; everything else asks first.
+AUTO_LAUNDRY_CATEGORIES = frozenset(
+    {"socks", "underwear", "undershirt", "t-shirt", "tank top", "top", "long-sleeve", "leggings", "sportswear"}
+)
+
+
 class Garment(Base):
     __tablename__ = "garment"
 
@@ -338,13 +345,32 @@ class Garment(Base):
     favorite: Mapped[bool] = mapped_column(Boolean, default=False)
     notes: Mapped[str | None] = mapped_column(Text, nullable=True)
     photo_id: Mapped[str | None] = mapped_column(ForeignKey("stored_file.id", ondelete="SET NULL"), nullable=True)
-    # clean / worn / laundry / repair / lent / stored
+    # clean / worn / laundry / washing / drying / repair / lent / stored
     state: Mapped[str] = mapped_column(String, default="clean")
     wears_per_wash: Mapped[int] = mapped_column(Integer, default=1)
     wears_since_wash: Mapped[int] = mapped_column(Integer, default=0)
+    # What happens at wears_per_wash: "auto" = into the laundry, "ask" = not suggested any more, and
+    # Steward asks. None = the category's default (socks and t-shirts auto, jeans ask).
+    laundry_mode: Mapped[str | None] = mapped_column(String, nullable=True)
+    extra_wears: Mapped[int] = mapped_column(Integer, default=0, server_default="0")  # "still fine" allowance
+    washed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    dry_until: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)  # None while drying = until marked
     wear_count: Mapped[int] = mapped_column(Integer, default=0)
     last_worn: Mapped[date | None] = mapped_column(Date, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+    @property
+    def laundry_mode_effective(self) -> str:
+        return self.laundry_mode or ("auto" if self.category in AUTO_LAUNDRY_CATEGORIES else "ask")
+
+    @property
+    def needs_wash(self) -> bool:
+        """Worn as often as it should be between washes, but not in the laundry yet ("ask" pieces)."""
+        return (
+            self.state == "worn"
+            and bool(self.wears_per_wash)
+            and self.wears_since_wash >= self.wears_per_wash + (self.extra_wears or 0)
+        )
 
     @property
     def cost_per_wear(self) -> float | None:

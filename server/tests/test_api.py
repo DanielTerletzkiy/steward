@@ -120,7 +120,8 @@ def test_appliance_runs(client):
                                                    "chore_ids": [vacuuming["id"]]}))  # fmt: skip
     washer = ok(client.post("/api/equipment", json={"name": "Washer", "kind": "washer", "ha_device_id": "dev1",
                                                     "chore_ids": [hang_up["id"]]}))  # fmt: skip
-    assert washer["automation_effective"] == {"chores": "make_due", "laundry": "ask"}
+    assert washer["automation_effective"] == {"chores": "make_due", "laundry": "auto"}
+    washer = ok(client.patch(f"/api/equipment/{washer['id']}", json={"automation": {"laundry": "ask"}}))
 
     ran = ok(client.post(f"/api/equipment/{robot['id']}/finished", json={"source": "vacuum.robot", "detail": "docked"}))
     assert ran["chores_done"] == ["Vacuum"]
@@ -194,3 +195,18 @@ def test_open_can_be_undone(client):
         ok(client.post(f"/api/stock/undo/{txn_id}"))
     item = next(i for i in ok(client.get("/api/stock")) if i["product"]["name"] == "Juice")
     assert (item["amount"], item["opened"], len([e for e in item["entries"] if e["amount"] > 0])) == (3, 0, 1)
+
+
+def test_washer_start_and_finish_move_the_laundry(client):
+    washer = ok(client.post("/api/equipment", json={"name": "Washer", "kind": "washer"}))
+    dryer = ok(client.post("/api/equipment", json={"name": "Dryer", "kind": "dryer"}))
+    tee = ok(client.post("/api/wardrobe/garments", json={"name": "Tee", "category": "t-shirt"}))
+    jeans = ok(client.post("/api/wardrobe/garments", json={"name": "Jeans", "category": "jeans"}))
+    ok(client.post("/api/wardrobe/wear", json={"garment_ids": [tee["id"], jeans["id"]]}))
+    assert ok(client.post(f"/api/equipment/{washer['id']}/started"))["washing"] == 1  # the tee; jeans aren't dirty
+    ok(client.post(f"/api/equipment/{washer['id']}/finished", json={}))
+    states = {g["name"]: g["state"] for g in ok(client.get("/api/wardrobe/garments"))}
+    assert states == {"Tee": "drying", "Jeans": "worn"}
+    assert ok(client.get("/api/summary"))["wardrobe"]["drying"][0]["name"] == "Tee"
+    ok(client.post(f"/api/equipment/{dryer['id']}/finished", json={}))  # out of the dryer: dry
+    assert {g["name"]: g["state"] for g in ok(client.get("/api/wardrobe/garments"))}["Tee"] == "clean"

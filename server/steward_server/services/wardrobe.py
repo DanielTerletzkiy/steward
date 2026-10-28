@@ -2,23 +2,28 @@
 
 from __future__ import annotations
 
-from datetime import date
+from datetime import date, timedelta
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..events import EventHub
-from ..models import Garment, Outfit, StyleProfile
+from ..models import AUTO_LAUNDRY_CATEGORIES, Garment, Outfit, StyleProfile
 from ..schemas import GarmentIn, GarmentPatch, OutfitFeedbackIn, OutfitIn, StyleProfileIn
-from ..timeutil import today
+from ..timeutil import as_utc, today, utcnow
 from ..ha_bridge import HABridge
 from . import Invalid, NotFound, ai
 from . import settings as settings_store
 from .files import FileStore
 
-LAYERS = ("base", "mid", "outer", "bottom", "full", "shoes", "accessory")
-LAYER_ORDER = {layer: i for i, layer in enumerate(("outer", "mid", "base", "full", "bottom", "shoes", "accessory"))}
-STATES = ("clean", "worn", "laundry", "repair", "lent", "stored")
+LAYERS = ("base", "mid", "outer", "bottom", "full", "shoes", "accessory", "underwear")
+LAYER_ORDER = {
+    layer: i for i, layer in enumerate(("outer", "mid", "base", "full", "bottom", "shoes", "accessory", "underwear"))
+}
+STATES = ("clean", "worn", "laundry", "washing", "drying", "repair", "lent", "stored")
+LAUNDRY_MODES = ("auto", "ask")
+SETTINGS_KEY = "wardrobe"
+DEFAULT_DRYING_HOURS = 24
 RAIN = ("none", "resistant", "waterproof")
 USES = ("home", "comfort", "going_out", "work", "sport", "formal")
 SEASONS = ("summer", "transition", "winter")
@@ -63,13 +68,24 @@ CATEGORIES: dict[str, tuple[str, int]] = {
     "cap": ("accessory", 10),
     "gloves": ("accessory", 10),
     "belt": ("accessory", 0),
+    # Tracked for the laundry, never part of outfit suggestions.
+    "socks": ("underwear", 1),
+    "underwear": ("underwear", 1),
+    "undershirt": ("underwear", 1),
+    "tank top": ("base", 1),
+    "sportswear": ("base", 1),
 }
 
 
 def vocabulary() -> dict:
     """The fixed values the UI, the AI tagger and the outfit engine share."""
     return {
-        "categories": [{"name": name, "layer": layer, "wears_per_wash": wears} for name, (layer, wears) in CATEGORIES.items()],
+        "categories": [
+            {"name": name, "layer": layer, "wears_per_wash": wears,
+             "laundry_mode": "auto" if name in AUTO_LAUNDRY_CATEGORIES else "ask"}
+            for name, (layer, wears) in CATEGORIES.items()
+        ],  # fmt: skip
+        "laundry_modes": list(LAUNDRY_MODES),
         "layers": list(LAYERS),
         "states": list(STATES),
         "rain": list(RAIN),
@@ -81,7 +97,7 @@ def vocabulary() -> dict:
 
 
 def _check(values: dict) -> None:
-    for key, allowed in (("layer", LAYERS), ("state", STATES), ("rain", RAIN)):
+    for key, allowed in (("layer", LAYERS), ("state", STATES), ("rain", RAIN), ("laundry_mode", LAUNDRY_MODES)):
         if values.get(key) is not None and values[key] not in allowed:
             raise Invalid(f"{key} must be one of: {', '.join(allowed)}")
     for key, allowed in (("uses", USES), ("seasons", SEASONS)):
@@ -133,6 +149,9 @@ async def update_garment(session: AsyncSession, hub: EventHub, garment_id: int, 
     _check(values)
     if values.get("state") == "clean" and "wears_since_wash" not in values:
         values["wears_since_wash"] = 0
+        values.setdefault("extra_wears", 0)
+    if values.get("state") not in (None, "drying") and "dry_until" not in values:
+        values["dry_until"] = None
     for key, value in values.items():
         setattr(garment, key, value)
     await session.commit()
@@ -174,7 +193,8 @@ async def remove_photo(session: AsyncSession, hub: EventHub, files: FileStore, g
 
 
 async def wear(session: AsyncSession, hub: EventHub, garment_ids: list[int], day: date | None = None) -> list[Garment]:
-    """Log one wear per piece. Pieces that reach their wears-per-wash go to the laundry."""
+    """Log one wear per piece. At its wears-per-wash, an "auto" piece goes into the laundry; an "ask"
+    piece stays out of suggestions and shows up under "Ready for the wash?"."""
     day = day or today()
     garments = []
     for garment_id in dict.fromkeys(garment_ids):
@@ -183,25 +203,107 @@ async def wear(session: AsyncSession, hub: EventHub, garment_ids: list[int], day
         garment.wears_since_wash += 1
         garment.last_worn = max(garment.last_worn or day, day)
         if garment.state in ("clean", "worn"):
-            due = garment.wears_per_wash and garment.wears_since_wash >= garment.wears_per_wash
-            garment.state = "laundry" if due else "worn"
+            garment.state = "worn"
+            if garment.needs_wash and garment.laundry_mode_effective == "auto":
+                garment.state = "laundry"
         garments.append(garment)
     await session.commit()
     hub.publish("wardrobe")
     return garments
 
 
-async def laundry_done(session: AsyncSession, hub: EventHub, garment_ids: list[int] | None = None) -> int:
-    """Mark pieces as washed: everything in the laundry, or the given pieces."""
-    query = select(Garment)
-    query = query.where(Garment.id.in_(garment_ids)) if garment_ids else query.where(Garment.state == "laundry")
-    garments = (await session.scalars(query)).all()
+async def to_laundry(session: AsyncSession, hub: EventHub, garment_ids: list[int]) -> int:
+    garments = (await session.scalars(select(Garment).where(Garment.id.in_(garment_ids)))).all()
     for garment in garments:
-        garment.state = "clean"
+        garment.state = "laundry"
+    await session.commit()
+    hub.publish("wardrobe")
+    return len(garments)
+
+
+async def still_fine(session: AsyncSession, hub: EventHub, garment_ids: list[int], wears: int | None = None) -> int:
+    """Not dirty yet: allow a few more wears before asking again."""
+    garments = (await session.scalars(select(Garment).where(Garment.id.in_(garment_ids)))).all()
+    for garment in garments:
+        more = wears or max(1, (garment.wears_per_wash or 2) // 2)
+        garment.extra_wears = max(0, garment.wears_since_wash - (garment.wears_per_wash or 0)) + more
+    await session.commit()
+    hub.publish("wardrobe")
+    return len(garments)
+
+
+async def drying_hours(session: AsyncSession) -> int | None:
+    config = await settings_store.get(session, SETTINGS_KEY, {}) or {}
+    return config.get("drying_hours", DEFAULT_DRYING_HOURS)
+
+
+async def start_wash(session: AsyncSession, hub: EventHub) -> int:
+    """The washing machine started: assume the laundry bin went in."""
+    garments = (await session.scalars(select(Garment).where(Garment.state == "laundry"))).all()
+    for garment in garments:
+        garment.state = "washing"
+    await session.commit()
+    hub.publish("wardrobe")
+    return len(garments)
+
+
+async def washed(session: AsyncSession, hub: EventHub, garment_ids: list[int] | None = None) -> int:
+    """Washed: the given pieces, else what is in the machine, else the whole laundry. They dry for the
+    configured hours (or until marked dry) before they're suggested again."""
+    query = select(Garment)
+    if garment_ids:
+        garments = (await session.scalars(query.where(Garment.id.in_(garment_ids)))).all()
+    else:
+        garments = (await session.scalars(query.where(Garment.state == "washing"))).all()
+        if not garments:
+            garments = (await session.scalars(query.where(Garment.state == "laundry"))).all()
+    hours = await drying_hours(session)
+    now = utcnow()
+    for garment in garments:
         garment.wears_since_wash = 0
+        garment.extra_wears = 0
+        garment.washed_at = now
+        if hours == 0:
+            garment.state, garment.dry_until = "clean", None
+        else:
+            garment.state = "drying"
+            garment.dry_until = now + timedelta(hours=hours) if hours is not None else None
     await settings_store.put(session, None, "laundry_prompt", None)
     await session.commit()
     hub.publish("wardrobe")
+    return len(garments)
+
+
+# "Laundry done" in the UI and HA means the same as a finished wash.
+laundry_done = washed
+
+
+async def dried(session: AsyncSession, hub: EventHub, garment_ids: list[int] | None = None) -> int:
+    """Dry and back in the closet: the given pieces, or everything drying (e.g. after the dryer)."""
+    query = select(Garment).where(Garment.state == "drying")
+    if garment_ids:
+        query = query.where(Garment.id.in_(garment_ids))
+    garments = (await session.scalars(query)).all()
+    for garment in garments:
+        garment.state, garment.dry_until = "clean", None
+    await session.commit()
+    hub.publish("wardrobe")
+    return len(garments)
+
+
+async def release_dried(session: AsyncSession, hub: EventHub) -> int:
+    """Pieces whose drying time is over are available again."""
+    now = utcnow()
+    garments = [
+        g
+        for g in (await session.scalars(select(Garment).where(Garment.state == "drying", Garment.dry_until.is_not(None)))).all()
+        if as_utc(g.dry_until) <= now
+    ]
+    for garment in garments:
+        garment.state, garment.dry_until = "clean", None
+    if garments:
+        await session.commit()
+        hub.publish("wardrobe")
     return len(garments)
 
 

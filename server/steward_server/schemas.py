@@ -443,6 +443,7 @@ class GarmentIn(BaseModel):
     favorite: bool = False
     notes: str | None = None
     wears_per_wash: int | None = None  # derived from the category when left out
+    laundry_mode: str | None = None  # auto / ask; None = the category's default
     photo_id: str | None = None
 
 
@@ -470,6 +471,9 @@ class GarmentPatch(BaseModel):
     state: str | None = None
     wears_per_wash: int | None = None
     wears_since_wash: int | None = Field(None, ge=0)  # lets "undo laundry done" restore the count
+    laundry_mode: str | None = None
+    extra_wears: int | None = Field(None, ge=0)
+    dry_until: UTCDatetime | None = None
     photo_id: str | None = None
 
 
@@ -499,6 +503,12 @@ class GarmentOut(ORM):
     state: str
     wears_per_wash: int
     wears_since_wash: int
+    laundry_mode: str | None
+    laundry_mode_effective: str
+    extra_wears: int
+    needs_wash: bool
+    washed_at: UTCDatetime | None
+    dry_until: UTCDatetime | None
     wear_count: int
     last_worn: date | None
     cost_per_wear: float | None
@@ -511,6 +521,17 @@ class WearIn(BaseModel):
 
 class LaundryIn(BaseModel):
     garment_ids: list[int] | None = None  # None = everything in the laundry
+
+
+class StillFineIn(BaseModel):
+    garment_ids: list[int]
+    wears: int | None = Field(None, ge=1, le=20)  # more wears before asking again; default about half the usual
+
+
+class WardrobeSettings(BaseModel):
+    # Hours freshly washed clothes need before they're suggested again; 0 = right away,
+    # None = until marked dry.
+    drying_hours: int | None = Field(24, ge=0, le=168)
 
 
 class OutfitIn(BaseModel):

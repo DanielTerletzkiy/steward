@@ -33,6 +33,7 @@ async def summary(session: AsyncSession) -> dict:
     people = await people_service.list_people(session)
     equipment = await equipment_service.list_equipment(session)
     garments = await wardrobe_service.list_garments(session)
+    needs_wash = [g for g in garments if g.needs_wash]
     outfits_today = await wardrobe_service.list_outfits(session, day=today())
     meals = await recipes_service.meal_plan(session, today(), today())
     recipe_names = {r.id: r.name for r in await recipes_service.list_recipes(session)} if meals else {}
@@ -88,8 +89,15 @@ async def summary(session: AsyncSession) -> dict:
         },
         "wardrobe": {
             "garments": len(garments),
-            "clean": sum(1 for g in garments if g.state in ("clean", "worn")),
+            "clean": sum(1 for g in garments if g.state in ("clean", "worn") and not g.needs_wash),
             "laundry": sum(1 for g in garments if g.state == "laundry"),
+            "needs_wash": [{"id": g.id, "name": g.name} for g in needs_wash],
+            "washing": sum(1 for g in garments if g.state == "washing"),
+            "drying": [
+                {"id": g.id, "name": g.name, "dry_until": g.dry_until.isoformat() if g.dry_until else None}
+                for g in garments
+                if g.state == "drying"
+            ],
             # A washing machine finished: "mark the laundry as clean?"
             "laundry_prompt": await settings_store.get(session, "laundry_prompt"),
             # Today's outfit per owner ("" = household): the worn one, else the newest suggestion.

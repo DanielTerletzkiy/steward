@@ -5,8 +5,8 @@ recognizes finished runs from what HA integrations expose:
 - vacuum entities going from "cleaning" back to the dock,
 - event entities announcing completion (LG ThinQ "washing_is_complete", "drying_is_complete", ...),
 - run-state sensors reaching an end state (LG ThinQ current_state "end", Home Connect "finished", ...).
-A finished run goes to the server (which completes or schedules chores, asks about the laundry) and
-fires `steward_appliance_finished` in HA for your own automations.
+A started run goes to the server too (a washer start puts the laundry bin "in the wash"). Both fire
+HA events, `steward_appliance_started` and `steward_appliance_finished`, for your own automations.
 """
 
 from __future__ import annotations
@@ -28,6 +28,7 @@ from .client import StewardError
 from .const import DOMAIN, LOGGER
 
 EVENT_FINISHED = f"{DOMAIN}_appliance_finished"
+EVENT_STARTED = f"{DOMAIN}_appliance_started"
 FINISH_EVENT_TYPES = {
     "washing_is_complete", "drying_is_complete", "cleaning_is_complete", "cleaning_is_completed",
     "styling_is_complete", "cooking_is_complete", "program_finished", "finished",
@@ -260,13 +261,29 @@ class ApplianceTracker:
         if equipment is None:
             return
         status = live_status(self.hass, linked_entities(self.hass, equipment))
-        if status == self._last_sent.get(equipment_id):
+        previous = self._last_sent.get(equipment_id)
+        if status == previous:
             return
+        if previous is not None and status["running"] and not previous["running"]:
+            # Only a seen transition counts: a restart in the middle of a cycle is not a new start.
+            await self._started(equipment, status.get("state"))
         try:
             await self.entry.runtime_data.client.put(f"api/equipment/{equipment_id}/live", status)
             self._last_sent[equipment_id] = status
         except StewardError as err:
             LOGGER.debug("Could not report %s status: %s", equipment["name"], err)
+
+    async def _started(self, equipment: dict[str, Any], state: str | None) -> None:
+        try:
+            result = await self.entry.runtime_data.client.post(f"api/equipment/{equipment['id']}/started")
+        except StewardError as err:
+            LOGGER.warning("Could not report that %s started: %s", equipment["name"], err)
+            return
+        self.hass.bus.async_fire(
+            EVENT_STARTED,
+            {"equipment_id": equipment["id"], "name": equipment["name"], "kind": equipment.get("kind"),
+             "state": state, "laundry_washing": result.get("washing")},
+        )  # fmt: skip
 
     async def _finished(self, equipment_id: int, entity_id: str, reason: str) -> None:
         equipment = self._equipment(equipment_id)

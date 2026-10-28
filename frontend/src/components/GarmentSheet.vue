@@ -5,8 +5,8 @@ import { api } from '@/api'
 import { t } from '@/i18n'
 import { useCatalog } from '@/composables/catalog'
 import { attempt, notify } from '@/composables/notify'
-import { formatDate, formatEuro, parseDay, relativeDay, daysFromToday } from '@/composables/format'
-import { label, setGarmentState, stateColor, stateIcon, swatch, useVocabulary, wearToday } from '@/composables/wardrobe'
+import { formatDate, formatEuro, formatTime, parseDateTime, parseDay, relativeDay, daysFromToday } from '@/composables/format'
+import { label, markDry, setGarmentState, stateColor, stateIcon, stillFine, swatch, toLaundry, useVocabulary, wearToday } from '@/composables/wardrobe'
 import GarmentThumb from './GarmentThumb.vue'
 import ConfirmDialog from './ConfirmDialog.vue'
 import type { Garment, GarmentState } from '@/types'
@@ -18,6 +18,11 @@ const { xs } = useDisplay()
 const { state, personName } = useCatalog()
 const vocab = useVocabulary()
 const confirmDelete = ref(false)
+
+function dryText(g: Garment) {
+  if (!g.dry_until) return t.wardrobe.dryManual
+  return t.wardrobe.dryUntil(`${relativeDay(daysFromToday(parseDateTime(g.dry_until)))} ${formatTime(g.dry_until)}`)
+}
 
 function lastWorn(g: Garment) {
   if (!g.last_worn) return t.wardrobe.neverWorn
@@ -116,6 +121,27 @@ async function remove(g: Garment) {
           </v-col>
         </v-row>
 
+        <v-alert
+          v-if="garment.needs_wash && (garment.state === 'clean' || garment.state === 'worn')"
+          type="warning"
+          variant="tonal"
+          density="compact"
+          icon="mdi-basket-plus-outline"
+          class="mt-4"
+          :title="t.wardrobe.readyForWash"
+        >
+          <div class="d-flex flex-wrap ga-2 mt-2">
+            <v-btn size="small" variant="flat" color="warning" prepend-icon="mdi-basket-plus-outline" @click="toLaundry([garment])">{{ t.wardrobe.toLaundry }}</v-btn>
+            <v-btn size="small" variant="text" @click="stillFine([garment])">{{ t.wardrobe.stillFine }}</v-btn>
+          </div>
+        </v-alert>
+        <v-alert v-else-if="garment.state === 'drying'" type="info" variant="tonal" density="compact" icon="mdi-weather-windy" class="mt-4">
+          <div class="d-flex flex-wrap align-center ga-2">
+            <span>{{ label.state('drying') }} · {{ dryText(garment) }}</span>
+            <v-spacer />
+            <v-btn size="small" variant="flat" color="info" prepend-icon="mdi-weather-sunny" @click="markDry([garment])">{{ t.wardrobe.dryNow }}</v-btn>
+          </div>
+        </v-alert>
         <div class="text-caption text-medium-emphasis mt-4 mb-1">{{ t.wardrobe.state }}</div>
         <v-chip-group :model-value="garment.state" mandatory column @update:model-value="(s: GarmentState) => setGarmentState(garment!, s)">
           <v-chip

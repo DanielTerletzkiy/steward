@@ -17,10 +17,13 @@ from ..schemas import (
     OutfitFeedbackIn,
     OutfitIn,
     OutfitOut,
+    StillFineIn,
     StyleProfileIn,
     StyleProfileOut,
+    WardrobeSettings,
     WearIn,
 )
+from ..services import settings as settings_store
 from ..services import ai, outfits, wardrobe
 
 router = APIRouter(prefix="/api/wardrobe", dependencies=[Depends(require_auth)])
@@ -83,7 +86,40 @@ async def wear(session: Session, hub: Hub, body: WearIn):
 
 @router.post("/laundry/done")
 async def laundry_done(session: Session, hub: Hub, body: LaundryIn | None = None) -> dict:
-    return {"washed": await wardrobe.laundry_done(session, hub, body.garment_ids if body else None)}
+    """Washed (they dry for a while, see settings)."""
+    return {"washed": await wardrobe.washed(session, hub, body.garment_ids if body else None)}
+
+
+@router.post("/laundry/add")
+async def to_laundry(session: Session, hub: Hub, body: LaundryIn) -> dict:
+    return {"moved": await wardrobe.to_laundry(session, hub, body.garment_ids or [])}
+
+
+@router.post("/laundry/still-fine")
+async def still_fine(session: Session, hub: Hub, body: StillFineIn) -> dict:
+    return {"updated": await wardrobe.still_fine(session, hub, body.garment_ids, body.wears)}
+
+
+@router.post("/laundry/start")
+async def start_wash(session: Session, hub: Hub) -> dict:
+    """The laundry went into the washing machine (for when no washer is linked)."""
+    return {"washing": await wardrobe.start_wash(session, hub)}
+
+
+@router.post("/laundry/dried")
+async def dried(session: Session, hub: Hub, body: LaundryIn | None = None) -> dict:
+    return {"dried": await wardrobe.dried(session, hub, body.garment_ids if body else None)}
+
+
+@router.get("/settings", response_model=WardrobeSettings)
+async def get_settings(session: Session):
+    return WardrobeSettings(drying_hours=await wardrobe.drying_hours(session))
+
+
+@router.put("/settings", response_model=WardrobeSettings)
+async def put_settings(session: Session, hub: Hub, body: WardrobeSettings):
+    await settings_store.put(session, hub, wardrobe.SETTINGS_KEY, body.model_dump())
+    return body
 
 
 @router.post("/laundry/dismiss", status_code=204)

@@ -11,6 +11,30 @@ import EmptyState from '@/components/EmptyState.vue'
 import type { AiJob, AiProvider, AiProviderIn, AiSettings, Forecast, WeatherSettings } from '@/types'
 
 const { data: ai, loading: aiLoading, error: aiError, reload: reloadAi } = useResource<AiSettings | null>(() => api.aiSettings(), ['settings'], null)
+const { data: wardrobeSettings } = useResource<{ drying_hours: number | null } | null>(() => api.wardrobeSettings(), ['settings', 'wardrobe'], null)
+const dryingOptions = [
+  { key: 'now', value: 0 },
+  { key: 'h12', value: 12 },
+  { key: 'h24', value: 24 },
+  { key: 'h48', value: 48 },
+  { key: 'manual', value: -1 },
+]
+const dryingValue = computed(() => {
+  const h = wardrobeSettings.value?.drying_hours
+  return h === undefined ? undefined : h === null ? -1 : h
+})
+const savingDrying = ref(false)
+async function setDrying(v: number) {
+  if (v == null || v === dryingValue.value) return
+  savingDrying.value = true
+  const res = await attempt(() => api.saveWardrobeSettings({ drying_hours: v === -1 ? null : v }))
+  savingDrying.value = false
+  if (res) {
+    wardrobeSettings.value = res
+    notify(t.settings.saved)
+  }
+}
+
 const { data: weather, reload: reloadWeather } = useResource<WeatherSettings | null>(() => api.weatherSettings(), ['settings'], null)
 
 const JOBS: AiJob[] = ['scan', 'wardrobe', 'outfits']
@@ -286,6 +310,24 @@ loadForecast()
         </v-col>
       </v-row>
     </template>
+
+    <!-- Wardrobe -->
+    <div class="d-flex align-center mb-1">
+      <v-icon icon="mdi-hanger" class="mr-2" color="primary" />
+      <div class="text-h6">{{ t.settings.wardrobe }}</div>
+      <v-progress-circular v-if="savingDrying" indeterminate size="18" width="2" color="primary" class="ml-3" />
+    </div>
+    <v-card variant="flat" border class="mb-6">
+      <v-card-text>
+        <div class="text-subtitle-2">{{ t.settings.dryingTime }}</div>
+        <div class="text-body-2 text-medium-emphasis mb-2">{{ t.settings.dryingHint }}</div>
+        <v-chip-group :model-value="dryingValue" mandatory column selected-class="text-primary" @update:model-value="setDrying">
+          <v-chip v-for="o in dryingOptions" :key="o.key" :value="o.value" variant="outlined" size="default" filter :disabled="savingDrying">
+            {{ t.settings.dryingOptions[o.key] }}
+          </v-chip>
+        </v-chip-group>
+      </v-card-text>
+    </v-card>
 
     <!-- Weather -->
     <div class="d-flex align-center mb-1">

@@ -9,16 +9,16 @@ import { consume } from '@/composables/stockActions'
 import {
   formatAmount, formatDate, formatDateTime, formatEuro, mdiIcon, parseDateTime, parseDay, relativeDue, relativeExpiry, todayIso,
 } from '@/composables/format'
-import { label, laundryDone, sourceIcon } from '@/composables/wardrobe'
+import { label, sourceIcon } from '@/composables/wardrobe'
 import { completeMeal, SLOTS } from '@/composables/recipes'
 import { kindIcon, liveSummary } from '@/composables/appliances'
 import EmptyState from '@/components/EmptyState.vue'
 import StatusChip from '@/components/StatusChip.vue'
-import GarmentThumb from '@/components/GarmentThumb.vue'
 import OutfitCollage from '@/components/OutfitCollage.vue'
 import MealDoneDialog from '@/components/MealDoneDialog.vue'
 import LaundryPromptBanner from '@/components/LaundryPromptBanner.vue'
-import type { Chore, Garment, MealPlanEntry, Summary } from '@/types'
+import LaundryPanel from '@/components/LaundryPanel.vue'
+import type { Chore, Equipment, Garment, MealPlanEntry, Summary } from '@/types'
 
 const { data, loading, error, reload } = useResource<Summary | null>(
   () => api.summary(),
@@ -50,13 +50,9 @@ const outfitsToday = computed(() =>
     .map(([owner, outfit]) => ({ owner, name: owner ? personName(owner) ?? owner : t.today.household, outfit }))
     .sort((a, b) => a.name.localeCompare(b.name, LOCALE)),
 )
-const laundryPieces = computed(() => garments.value.filter((g) => g.state === 'laundry'))
-const washing = ref(false)
-async function doLaundry() {
-  washing.value = true
-  await laundryDone(laundryPieces.value)
-  washing.value = false
-}
+const laundryPieces = computed(() => garments.value.filter((g) => g.state === 'laundry' || g.state === 'washing'))
+const { data: equipmentList } = useResource<Equipment[]>(() => api.equipmentList(), ['equipment'], [])
+const hasWasher = computed(() => equipmentList.value.some((e) => e.kind === 'washer' && (!!e.ha_device_id || e.ha_entities.length > 0)))
 
 const greeting = computed(() => {
   const h = new Date().getHours()
@@ -321,26 +317,7 @@ async function consumeOne(productId: number, spoiled = false) {
 
       <!-- Laundry -->
       <v-col cols="12" md="6" lg="4">
-        <v-card class="h-100 d-flex flex-column" variant="flat" border>
-          <v-card-item prepend-icon="mdi-washing-machine" :title="t.today.laundry" :subtitle="t.today.cleanCount(data.wardrobe.clean)">
-            <template #append><v-chip v-if="data.wardrobe.laundry" color="warning" variant="tonal">{{ data.wardrobe.laundry }}</v-chip></template>
-          </v-card-item>
-          <EmptyState v-if="!data.wardrobe.laundry" compact icon="mdi-check-all" :title="t.today.laundryEmpty" />
-          <template v-else>
-            <v-card-text class="pt-0">
-              <div class="text-body-1 mb-2">{{ t.today.laundryCount(data.wardrobe.laundry) }}</div>
-              <div class="d-flex flex-wrap ga-1">
-                <div v-for="g in laundryPieces.slice(0, 8)" :key="g.id" style="width: 40px" :title="g.name">
-                  <GarmentThumb :photo-id="g.photo_id" :layer="g.layer" :icon-size="18" rounded="md" />
-                </div>
-              </div>
-            </v-card-text>
-            <v-spacer />
-            <v-card-actions>
-              <v-btn color="primary" variant="tonal" prepend-icon="mdi-check-all" :loading="washing" @click="doLaundry">{{ t.wardrobe.laundryDone }}</v-btn>
-            </v-card-actions>
-          </template>
-        </v-card>
+        <LaundryPanel :garments="garments" :has-washer="hasWasher" @open="() => $router.push('/wardrobe')" />
       </v-col>
 
       <!-- Warranty ending -->
