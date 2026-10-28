@@ -9,5 +9,8 @@ RUN python -c "import tomllib; print('\n'.join(tomllib.load(open('pyproject.toml
     # The eBon parser's own metadata pulls in dev tools; its runtime needs only the packages above.
     && pip install --no-cache-dir --no-deps rewe-ebon-parser
 COPY steward_server ./steward_server
-LABEL io.hass.type="app" io.hass.name="Steward" io.hass.version="0.1.0"
+# The Supervisor and the release workflow pass these.
+ARG BUILD_VERSION=dev
+ARG BUILD_ARCH=amd64
+LABEL io.hass.type="app" io.hass.name="Steward" io.hass.version="${BUILD_VERSION}" io.hass.arch="${BUILD_ARCH}"
 CMD ["python", "-m", "steward_server.main"]

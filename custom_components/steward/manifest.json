@@ -5,12 +5,14 @@
     "frontend",
     "person"
   ],
-  "codeowners": [],
+  "codeowners": [
+    "@DanielTerletzkiy"
+  ],
   "config_flow": true,
-  "documentation": "https://github.com/",
+  "documentation": "https://github.com/DanielTerletzkiy/steward",
   "integration_type": "service",
   "iot_class": "local_push",
-  "issue_tracker": "https://github.com/",
+  "issue_tracker": "https://github.com/DanielTerletzkiy/steward/issues",
   "requirements": [],
   "version": "0.1.0"
 }

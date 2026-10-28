@@ -1,0 +1,6 @@
+line-length = 130
+
+[lint]
+select = ["F", "E9", "B"]
+# FastAPI dependencies are declared as call defaults.
+ignore = ["B008"]

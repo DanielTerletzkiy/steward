@@ -24,16 +24,27 @@ The plan and decisions are in [PLAN.md](PLAN.md).
 
 ## Install in your Home Assistant
 
-See [INSTALL.md](INSTALL.md). In short:
-1. `dev/scripts/build_app.sh` stages the app in `dist/ha-app/steward`.
-2. Copy that folder to HA's `/addons` and `custom_components/steward` to `/config/custom_components`, over SSH.
+See [INSTALL.md](INSTALL.md). Manual installation:
+1. Download `steward-app-<version>.zip` and `steward-integration-<version>.zip` from the GitHub release.
+2. Copy their `steward` folders to HA's `addons` and `config/custom_components` (Samba or SSH), and restart HA.
 3. Install **Steward** from **Local apps**.
 
 The app:
 - opens in the sidebar through ingress, signed in as your HA user;
 - announces itself, so HA shows **Discovered: Steward** and the integration sets up in one click.
 
-`dev/scripts/build_app.sh --docker` also builds the image the way the Supervisor would. HACS and the app store's "Add repository" need published images and a public repository (see INSTALL.md).
+With a public repository, the app store ("Repositories") and HACS ("Custom repositories") install and update it straight from GitHub. The release workflow publishes the app images to ghcr.io.
+
+## CI and releases
+
+- **CI** (`.github/workflows/ci.yml`) runs on every push and pull request:
+  - server tests;
+  - ruff;
+  - type check and build of the web UI;
+  - hassfest for the integration.
+- **Release** (`.github/workflows/release.yml`) runs on a `v*` tag matching the version in `app/config.yaml`. It builds the amd64 and aarch64 app images to `ghcr.io/danielterletzkiy/{arch}-steward` and creates a GitHub release with the zips. INSTALL.md describes the steps.
+
+`dev/scripts/build_app.sh` stages the app locally in `dist/ha-app/steward`; `--docker` also builds the image the way the Supervisor would.
 
 ## Run the demo (HA Container + Docker)
 

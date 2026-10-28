@@ -1,2 +1,4 @@
 # Makes this repository an app repository for Home Assistant (Settings → Apps → App store → Repositories).
 name: Steward
+url: https://github.com/DanielTerletzkiy/steward
+maintainer: Daniel Terletzkiy

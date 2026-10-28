@@ -2,7 +2,11 @@
 name: Steward
 version: "0.1.0"
 slug: steward
+url: https://github.com/DanielTerletzkiy/steward
 description: Household management for Home Assistant - stock, shopping, chores, receipts, equipment and wardrobe
+# Published by .github/workflows/release.yml. dev/scripts/build_app.sh drops this line, so a
+# manually copied app builds on the device instead.
+image: ghcr.io/danielterletzkiy/{arch}-steward
 arch:
   - aarch64
   - amd64

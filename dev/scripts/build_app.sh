@@ -11,6 +11,8 @@ out="$root/dist/ha-app/steward"
 (cd "$root/frontend" && npm run build --silent)
 rm -rf "$out" && mkdir -p "$out"
 cp -R "$root/app/." "$out/"
+# Without `image:` the Supervisor builds the app on the device instead of pulling it from ghcr.io.
+grep -v '^image:' "$root/app/config.yaml" > "$out/config.yaml"
 cp "$root/server/pyproject.toml" "$out/"
 rsync -a --exclude '__pycache__' "$root/server/steward_server" "$out/"
 echo "Staged $out"

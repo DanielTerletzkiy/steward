@@ -9,6 +9,7 @@ from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import CONF_TOKEN, CONF_URL, EVENT_HOMEASSISTANT_STARTED, Platform
 from homeassistant.core import CoreState, Event, HomeAssistant, callback
 from homeassistant.exceptions import ConfigEntryAuthFailed, ConfigEntryNotReady
+from homeassistant.helpers import config_validation as cv
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
 from homeassistant.helpers.debounce import Debouncer
 from homeassistant.helpers.event import async_track_state_change_filtered, TrackStates
@@ -22,6 +23,8 @@ from .coordinator import StewardConfigEntry, StewardCoordinator, StewardRuntime
 from .services import async_setup_services
 
 PLATFORMS = [Platform.BUTTON, Platform.CALENDAR, Platform.IMAGE, Platform.SENSOR, Platform.TODO]
+# Set up from the UI only; nothing in configuration.yaml.
+CONFIG_SCHEMA = cv.config_entry_only_config_schema(DOMAIN)
 
 
 async def async_setup(hass: HomeAssistant, config: ConfigType) -> bool:
