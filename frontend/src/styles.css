@@ -1,0 +1,11 @@
+html, body { overscroll-behavior-y: none; }
+.page { max-width: 1200px; margin: 0 auto; padding: 16px; }
+@media (min-width: 960px) { .page { padding: 24px 32px; } }
+.page-title { font-size: 1.6rem; font-weight: 500; line-height: 1.2; }
+.text-tabular { font-variant-numeric: tabular-nums; }
+.min-w-0 { min-width: 0; }
+.gap-2 { gap: 8px; }
+.gap-3 { gap: 12px; }
+.clickable { cursor: pointer; }
+.line-through { text-decoration: line-through; }
+.v-list-item-title.wrap { white-space: normal; }

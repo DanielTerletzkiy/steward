@@ -1,0 +1,32 @@
+# Local demo: Home Assistant (Container) + the Steward server.
+#   docker compose -f dev/docker-compose.yml up -d --build
+# Home Assistant: http://localhost:8123   Steward UI: http://localhost:8095
+name: steward-dev
+
+services:
+  homeassistant:
+    image: ghcr.io/home-assistant/home-assistant:stable
+    ports: ["8123:8123"]
+    environment:
+      TZ: Europe/Berlin
+    volumes:
+      - ./ha-config:/config
+      - ../custom_components:/config/custom_components:ro
+      - ../samples/ebons:/share/steward/inbox:ro
+    restart: unless-stopped
+
+  steward:
+    build:
+      context: ..
+    ports: ["8095:8095"]
+    environment:
+      TZ: Europe/Berlin
+      STEWARD_API_TOKEN: ${STEWARD_API_TOKEN:-dev-token}
+      # Local demo only: the sidebar iframe calls the API without a token.
+      STEWARD_TRUST_ALL: "true"
+      STEWARD_SEED_DEMO: "true"
+      STEWARD_DEMO_RECEIPTS: /samples
+    volumes:
+      - ./data:/data
+      - ../samples/ebons:/samples:ro
+    restart: unless-stopped

@@ -1,0 +1,12 @@
+samples/
+.venv/
+__pycache__/
+*.pyc
+node_modules/
+dist/
+dev/ha-config/*
+!dev/ha-config/configuration.yaml
+dev/data*/
+server/steward_server/static/
+.DS_Store
+dev/.env

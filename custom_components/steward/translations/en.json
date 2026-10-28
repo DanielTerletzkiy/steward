@@ -1,0 +1,189 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "Steward",
+        "description": "Connect Home Assistant to your Steward server.",
+        "data": {
+          "url": "Server URL",
+          "token": "API token",
+          "panel_url": "Sidebar URL (as your browser reaches it)"
+        }
+      }
+    },
+    "error": {
+      "cannot_connect": "Cannot reach the Steward server.",
+      "invalid_auth": "The API token was rejected."
+    },
+    "abort": {
+      "already_configured": "Steward is already set up."
+    }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "data": {
+          "panel_url": "Sidebar URL"
+        }
+      }
+    }
+  },
+  "entity": {
+    "todo": {
+      "tasks": {
+        "name": "Tasks"
+      },
+      "chores_everyone": {
+        "name": "Chores (everyone)"
+      },
+      "chores_person": {
+        "name": "Chores {person}"
+      }
+    },
+    "sensor": {
+      "expiring_soon": {
+        "name": "Expiring soon"
+      },
+      "expired": {
+        "name": "Expired"
+      },
+      "below_min_stock": {
+        "name": "Below minimum stock"
+      },
+      "stock_value": {
+        "name": "Stock value"
+      },
+      "spending_month": {
+        "name": "Spending this month"
+      },
+      "spending_total": {
+        "name": "Spending total"
+      },
+      "last_trip": {
+        "name": "Last shopping trip"
+      },
+      "deposit_balance": {
+        "name": "Deposit balance"
+      },
+      "chores_due": {
+        "name": "Chores due"
+      },
+      "tasks_due": {
+        "name": "Tasks due"
+      },
+      "person_chores": {
+        "name": "Chores due {person}"
+      }
+    },
+    "calendar": {
+      "chores": {
+        "name": "Chores"
+      },
+      "due_dates": {
+        "name": "Best-before dates"
+      },
+      "tasks": {
+        "name": "Tasks"
+      }
+    },
+    "button": {
+      "add_missing": {
+        "name": "Add missing products to shopping list"
+      }
+    }
+  },
+  "services": {
+    "purchase": {
+      "name": "Purchase",
+      "description": "Put a product into stock.",
+      "fields": {
+        "product": {
+          "name": "Product",
+          "description": "Product name or id."
+        },
+        "amount": {
+          "name": "Amount",
+          "description": "How much."
+        },
+        "due_date": {
+          "name": "Best before",
+          "description": "Defaults to the product's shelf life."
+        },
+        "price": {
+          "name": "Price",
+          "description": "Price per unit."
+        }
+      }
+    },
+    "consume": {
+      "name": "Consume",
+      "description": "Take a product out of stock (opened and first-expiring first).",
+      "fields": {
+        "product": {
+          "name": "Product",
+          "description": "Product name or id."
+        },
+        "amount": {
+          "name": "Amount",
+          "description": "How much."
+        },
+        "spoiled": {
+          "name": "Spoiled",
+          "description": "Thrown away instead of used."
+        }
+      }
+    },
+    "execute_chore": {
+      "name": "Track chore",
+      "description": "Mark a chore as done.",
+      "fields": {
+        "chore": {
+          "name": "Chore",
+          "description": "Chore name or id."
+        },
+        "person": {
+          "name": "Person",
+          "description": "Who did it. Defaults to whoever was next."
+        },
+        "skipped": {
+          "name": "Skipped",
+          "description": "Skip this time instead."
+        }
+      }
+    },
+    "add_to_shopping_list": {
+      "name": "Add to shopping list",
+      "description": "Add an item to the shopping list.",
+      "fields": {
+        "item": {
+          "name": "Item",
+          "description": "Text or product name."
+        },
+        "amount": {
+          "name": "Amount",
+          "description": "How much."
+        }
+      }
+    },
+    "import_receipt": {
+      "name": "Import receipt",
+      "description": "Import a REWE eBon PDF.",
+      "fields": {
+        "path": {
+          "name": "Path",
+          "description": "PDF file path (must be in allowlist_external_dirs)."
+        }
+      }
+    },
+    "get_stock": {
+      "name": "Get stock",
+      "description": "Return what is in stock.",
+      "fields": {
+        "product": {
+          "name": "Product filter",
+          "description": "Part of a product name."
+        }
+      }
+    }
+  }
+}

@@ -1,0 +1,88 @@
+purchase:
+  fields:
+    product:
+      required: true
+      example: "Vollmilch 1 l"
+      selector:
+        text:
+    amount:
+      default: 1
+      selector:
+        number:
+          min: 0.01
+          max: 1000
+          step: 0.01
+          mode: box
+    due_date:
+      selector:
+        date:
+    price:
+      selector:
+        number:
+          min: 0
+          max: 10000
+          step: 0.01
+          mode: box
+          unit_of_measurement: EUR
+consume:
+  fields:
+    product:
+      required: true
+      example: "Vollmilch 1 l"
+      selector:
+        text:
+    amount:
+      default: 1
+      selector:
+        number:
+          min: 0.01
+          max: 1000
+          step: 0.01
+          mode: box
+    spoiled:
+      default: false
+      selector:
+        boolean:
+execute_chore:
+  fields:
+    chore:
+      required: true
+      example: "Staubsaugen"
+      selector:
+        text:
+    person:
+      selector:
+        entity:
+          domain: person
+    skipped:
+      default: false
+      selector:
+        boolean:
+add_to_shopping_list:
+  fields:
+    item:
+      required: true
+      example: "Kaffeebohnen"
+      selector:
+        text:
+    amount:
+      default: 1
+      selector:
+        number:
+          min: 0.01
+          max: 1000
+          step: 0.01
+          mode: box
+import_receipt:
+  fields:
+    path:
+      required: true
+      example: "/share/steward/inbox/REWE-ebon.pdf"
+      selector:
+        text:
+get_stock:
+  fields:
+    product:
+      example: "Milch"
+      selector:
+        text:

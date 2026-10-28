@@ -1,0 +1,214 @@
+<script setup lang="ts">
+import { computed } from 'vue'
+import { api } from '@/api'
+import { LOCALE, t } from '@/i18n'
+import { useResource } from '@/composables/resource'
+import { useCatalog } from '@/composables/catalog'
+import { attempt, notify } from '@/composables/notify'
+import { consume } from '@/composables/stockActions'
+import {
+  formatAmount, formatDateTime, formatEuro, mdiIcon, parseDateTime, parseDay, relativeDue, relativeExpiry,
+} from '@/composables/format'
+import EmptyState from '@/components/EmptyState.vue'
+import StatusChip from '@/components/StatusChip.vue'
+import type { Chore, Summary } from '@/types'
+
+const { data, loading, error, reload } = useResource<Summary | null>(
+  () => api.summary(),
+  ['stock', 'shopping', 'chores', 'tasks', 'receipts', 'people', 'catalog'],
+  null,
+)
+const { productsById, personName } = useCatalog()
+
+const greeting = computed(() => {
+  const h = new Date().getHours()
+  return h < 11 ? t.today.greetingMorning : h < 18 ? t.today.greetingDay : t.today.greetingEvening
+})
+const todayLabel = new Intl.DateTimeFormat(LOCALE, { weekday: 'long', day: 'numeric', month: 'long' }).format(new Date())
+
+const expiring = computed(() => {
+  if (!data.value) return []
+  return [
+    ...data.value.stock.expired.map((i) => ({ ...i, status: 'expired' })),
+    ...data.value.stock.due_soon.map((i) => ({ ...i, status: 'due_soon' })),
+  ].sort((a, b) => (a.due ?? '').localeCompare(b.due ?? ''))
+})
+const dueChores = computed<Chore[]>(() => (data.value ? [...data.value.chores.overdue, ...data.value.chores.due_today] : []))
+
+async function choreDone(c: Chore) {
+  const res = await attempt(() => api.executeChore(c.id))
+  if (res) notify(t.chores.doneMsg(c.name))
+}
+async function taskDone(task: { id: number; name: string }) {
+  const res = await attempt(() => api.updateTask(task.id, { done: true }))
+  if (res)
+    notify(t.tasks.doneMsg(task.name), {
+      action: { label: t.common.undo, run: async () => void (await attempt(() => api.updateTask(task.id, { done: false }))) },
+    })
+}
+async function addMissing() {
+  const lists = await attempt(() => api.shoppingLists())
+  if (!lists?.length) return
+  const res = await attempt(() => api.addMissing(lists[0].id))
+  if (res) notify(t.shopping.added(res.added))
+}
+async function consumeOne(productId: number, spoiled = false) {
+  const p = productsById.value.get(productId)
+  if (p) await consume(p, 1, spoiled)
+}
+</script>
+
+<template>
+  <div class="page">
+    <div class="mb-5">
+      <div class="page-title">{{ greeting }}</div>
+      <div class="text-body-2 text-medium-emphasis">{{ todayLabel }}</div>
+    </div>
+
+    <v-alert v-if="error && !data" type="error" variant="tonal" :title="t.app.loadError" :text="error" class="mb-4">
+      <template #append><v-btn variant="text" @click="reload">{{ t.app.retry }}</v-btn></template>
+    </v-alert>
+
+    <v-row v-if="loading && !data">
+      <v-col v-for="i in 6" :key="i" cols="12" md="6" lg="4"><v-skeleton-loader type="card" class="rounded-xl" /></v-col>
+    </v-row>
+
+    <v-row v-else-if="data">
+      <!-- Spending / key numbers -->
+      <v-col cols="12">
+        <v-row dense>
+          <v-col cols="6" md="3">
+            <v-card color="primary" variant="flat" class="h-100">
+              <v-card-text>
+                <div class="text-caption opacity-80">{{ t.today.spending }}</div>
+                <div class="text-h5 font-weight-bold text-tabular">{{ formatEuro(data.spending.month_total) }}</div>
+                <div class="text-caption opacity-80">{{ t.today.trips(data.spending.month_trips) }}</div>
+              </v-card-text>
+            </v-card>
+          </v-col>
+          <v-col cols="6" md="3">
+            <v-card variant="tonal" color="secondary" class="h-100" :to="data.spending.last_trip ? `/receipts/${data.spending.last_trip.receipt_id}` : undefined">
+              <v-card-text>
+                <div class="text-caption">{{ t.today.lastTrip }}</div>
+                <template v-if="data.spending.last_trip">
+                  <div class="text-h5 font-weight-bold text-tabular">{{ formatEuro(data.spending.last_trip.total) }}</div>
+                  <div class="text-caption text-truncate">{{ formatDateTime(data.spending.last_trip.at) }} · {{ t.today.items(data.spending.last_trip.items) }}</div>
+                </template>
+                <div v-else class="text-body-2 mt-2">{{ t.today.noReceipts }}</div>
+              </v-card-text>
+            </v-card>
+          </v-col>
+          <v-col cols="6" md="3">
+            <v-card variant="tonal" color="secondary" class="h-100">
+              <v-card-text>
+                <div class="text-caption d-flex align-center">
+                  {{ t.today.deposit }}
+                  <v-tooltip :text="t.today.depositHint" location="top">
+                    <template #activator="{ props }"><v-icon v-bind="props" icon="mdi-information-outline" size="14" class="ml-1" /></template>
+                  </v-tooltip>
+                </div>
+                <div class="text-h5 font-weight-bold text-tabular" :class="data.spending.deposit_balance < 0 ? 'text-warning' : ''">
+                  {{ formatEuro(data.spending.deposit_balance) }}
+                </div>
+                <div class="text-caption">{{ t.today.depositSub }}</div>
+              </v-card-text>
+            </v-card>
+          </v-col>
+          <v-col cols="6" md="3">
+            <v-card variant="tonal" color="secondary" class="h-100" to="/stock">
+              <v-card-text>
+                <div class="text-caption">{{ t.today.stockValue }}</div>
+                <div class="text-h5 font-weight-bold text-tabular">{{ formatEuro(data.stock.value) }}</div>
+                <div class="text-caption">{{ t.today.productsInStock(data.stock.products_in_stock) }}</div>
+              </v-card-text>
+            </v-card>
+          </v-col>
+        </v-row>
+      </v-col>
+
+      <!-- Chores -->
+      <v-col cols="12" md="6" lg="4">
+        <v-card class="h-100" variant="flat" border>
+          <v-card-item prepend-icon="mdi-broom" :title="t.today.chores">
+            <template #append><v-chip v-if="dueChores.length" color="warning" variant="tonal">{{ dueChores.length }}</v-chip></template>
+          </v-card-item>
+          <EmptyState v-if="!dueChores.length" compact icon="mdi-party-popper" :title="t.today.noChores" />
+          <v-list v-else lines="two" density="comfortable" bg-color="transparent">
+            <v-list-item v-for="c in dueChores" :key="c.id" :prepend-icon="mdiIcon(c.icon)">
+              <v-list-item-title>{{ c.name }}</v-list-item-title>
+              <v-list-item-subtitle>
+                <span :class="c.status === 'overdue' ? 'text-error' : 'text-warning'">{{ c.next_due ? relativeDue(parseDateTime(c.next_due)) : '' }}</span>
+                · {{ personName(c.next_assignee) ?? t.chores.everyone }}
+              </v-list-item-subtitle>
+              <template #append>
+                <v-btn color="primary" variant="tonal" size="small" prepend-icon="mdi-check" @click="choreDone(c)">{{ t.common.done }}</v-btn>
+              </template>
+            </v-list-item>
+          </v-list>
+        </v-card>
+      </v-col>
+
+      <!-- Expiring -->
+      <v-col cols="12" md="6" lg="4">
+        <v-card class="h-100" variant="flat" border>
+          <v-card-item prepend-icon="mdi-clock-alert-outline" :title="t.today.expiring">
+            <template #append><v-chip v-if="data.stock.expired.length" color="error" variant="tonal">{{ data.stock.expired.length }}</v-chip></template>
+          </v-card-item>
+          <EmptyState v-if="!expiring.length" compact icon="mdi-leaf" :title="t.today.nothingExpiring" />
+          <v-list v-else density="comfortable" lines="two" bg-color="transparent">
+            <v-list-item v-for="i in expiring" :key="i.product_id">
+              <v-list-item-title>{{ i.name }}</v-list-item-title>
+              <v-list-item-subtitle>{{ formatAmount(i.amount, i.unit) }} · {{ relativeExpiry(i.due) }}</v-list-item-subtitle>
+              <template #append>
+                <StatusChip :status="i.status" class="mr-1 d-none d-sm-flex" />
+                <v-menu>
+                  <template #activator="{ props }"><v-btn v-bind="props" icon="mdi-dots-vertical" variant="text" size="small" /></template>
+                  <v-list density="compact">
+                    <v-list-item prepend-icon="mdi-minus" :title="t.stock.consume" @click="consumeOne(i.product_id)" />
+                    <v-list-item prepend-icon="mdi-delete-variant" :title="t.stock.spoil" @click="consumeOne(i.product_id, true)" />
+                  </v-list>
+                </v-menu>
+              </template>
+            </v-list-item>
+          </v-list>
+        </v-card>
+      </v-col>
+
+      <!-- Below min -->
+      <v-col cols="12" md="6" lg="4">
+        <v-card class="h-100" variant="flat" border>
+          <v-card-item prepend-icon="mdi-arrow-down-bold-circle-outline" :title="t.today.belowMin">
+            <template #append><v-chip v-if="data.stock.below_min.length" color="warning" variant="tonal">{{ data.stock.below_min.length }}</v-chip></template>
+          </v-card-item>
+          <EmptyState v-if="!data.stock.below_min.length" compact icon="mdi-check-all" :title="t.today.nothingBelowMin" />
+          <template v-else>
+            <v-list density="compact" bg-color="transparent">
+              <v-list-item v-for="i in data.stock.below_min" :key="i.product_id" :title="i.name">
+                <template #append><span class="text-body-2 text-medium-emphasis text-tabular">{{ formatAmount(i.amount, i.unit) }}</span></template>
+              </v-list-item>
+            </v-list>
+            <v-card-actions>
+              <v-btn color="primary" variant="tonal" prepend-icon="mdi-cart-plus" @click="addMissing">{{ t.today.addToList }}</v-btn>
+            </v-card-actions>
+          </template>
+        </v-card>
+      </v-col>
+
+      <!-- Tasks -->
+      <v-col cols="12" md="6" lg="4">
+        <v-card class="h-100" variant="flat" border>
+          <v-card-item prepend-icon="mdi-format-list-checks" :title="t.today.tasks" :subtitle="t.today.openTasks(data.tasks.open)" />
+          <EmptyState v-if="!data.tasks.due.length" compact icon="mdi-check-circle-outline" :title="t.today.noTasks" />
+          <v-list v-else density="comfortable" bg-color="transparent">
+            <v-list-item v-for="task in data.tasks.due" :key="task.id" :title="task.name" :subtitle="relativeDue(parseDay(task.due))">
+              <template #prepend>
+                <v-checkbox-btn color="primary" @update:model-value="taskDone(task)" />
+              </template>
+            </v-list-item>
+          </v-list>
+          <v-card-actions><v-btn variant="text" to="/chores" append-icon="mdi-chevron-right">{{ t.nav.chores }}</v-btn></v-card-actions>
+        </v-card>
+      </v-col>
+    </v-row>
+  </div>
+</template>

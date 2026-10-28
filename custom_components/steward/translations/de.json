@@ -1,0 +1,189 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "Steward",
+        "description": "Verbinde Home Assistant mit deinem Steward-Server.",
+        "data": {
+          "url": "Server-URL",
+          "token": "API-Token",
+          "panel_url": "Seitenleisten-URL (wie dein Browser sie erreicht)"
+        }
+      }
+    },
+    "error": {
+      "cannot_connect": "Steward-Server nicht erreichbar.",
+      "invalid_auth": "Das API-Token wurde abgelehnt."
+    },
+    "abort": {
+      "already_configured": "Steward ist bereits eingerichtet."
+    }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "data": {
+          "panel_url": "Seitenleisten-URL"
+        }
+      }
+    }
+  },
+  "entity": {
+    "todo": {
+      "tasks": {
+        "name": "Aufgaben"
+      },
+      "chores_everyone": {
+        "name": "Haushalt (alle)"
+      },
+      "chores_person": {
+        "name": "Haushalt {person}"
+      }
+    },
+    "sensor": {
+      "expiring_soon": {
+        "name": "Läuft bald ab"
+      },
+      "expired": {
+        "name": "Abgelaufen"
+      },
+      "below_min_stock": {
+        "name": "Unter Mindestbestand"
+      },
+      "stock_value": {
+        "name": "Vorratswert"
+      },
+      "spending_month": {
+        "name": "Ausgaben diesen Monat"
+      },
+      "spending_total": {
+        "name": "Ausgaben gesamt"
+      },
+      "last_trip": {
+        "name": "Letzter Einkauf"
+      },
+      "deposit_balance": {
+        "name": "Pfand-Saldo"
+      },
+      "chores_due": {
+        "name": "Fällige Hausarbeiten"
+      },
+      "tasks_due": {
+        "name": "Fällige Aufgaben"
+      },
+      "person_chores": {
+        "name": "Hausarbeiten fällig {person}"
+      }
+    },
+    "calendar": {
+      "chores": {
+        "name": "Hausarbeiten"
+      },
+      "due_dates": {
+        "name": "Haltbarkeit"
+      },
+      "tasks": {
+        "name": "Aufgaben"
+      }
+    },
+    "button": {
+      "add_missing": {
+        "name": "Fehlendes auf die Einkaufsliste"
+      }
+    }
+  },
+  "services": {
+    "purchase": {
+      "name": "Einkaufen",
+      "description": "Ein Produkt in den Vorrat legen.",
+      "fields": {
+        "product": {
+          "name": "Produkt",
+          "description": "Produktname oder ID."
+        },
+        "amount": {
+          "name": "Menge",
+          "description": "Wie viel."
+        },
+        "due_date": {
+          "name": "Haltbar bis",
+          "description": "Standard: Haltbarkeit des Produkts."
+        },
+        "price": {
+          "name": "Preis",
+          "description": "Preis pro Einheit."
+        }
+      }
+    },
+    "consume": {
+      "name": "Verbrauchen",
+      "description": "Ein Produkt aus dem Vorrat nehmen (Angebrochenes und Ablaufendes zuerst).",
+      "fields": {
+        "product": {
+          "name": "Produkt",
+          "description": "Produktname oder ID."
+        },
+        "amount": {
+          "name": "Menge",
+          "description": "Wie viel."
+        },
+        "spoiled": {
+          "name": "Verdorben",
+          "description": "Weggeworfen statt verbraucht."
+        }
+      }
+    },
+    "execute_chore": {
+      "name": "Hausarbeit erledigt",
+      "description": "Eine Hausarbeit als erledigt markieren.",
+      "fields": {
+        "chore": {
+          "name": "Hausarbeit",
+          "description": "Name oder ID."
+        },
+        "person": {
+          "name": "Person",
+          "description": "Wer es gemacht hat. Standard: wer dran war."
+        },
+        "skipped": {
+          "name": "Übersprungen",
+          "description": "Diesmal überspringen."
+        }
+      }
+    },
+    "add_to_shopping_list": {
+      "name": "Auf die Einkaufsliste",
+      "description": "Einen Eintrag auf die Einkaufsliste setzen.",
+      "fields": {
+        "item": {
+          "name": "Eintrag",
+          "description": "Text oder Produktname."
+        },
+        "amount": {
+          "name": "Menge",
+          "description": "Wie viel."
+        }
+      }
+    },
+    "import_receipt": {
+      "name": "Kassenbon importieren",
+      "description": "Einen REWE-eBon (PDF) importieren.",
+      "fields": {
+        "path": {
+          "name": "Pfad",
+          "description": "Pfad zur PDF (muss in allowlist_external_dirs liegen)."
+        }
+      }
+    },
+    "get_stock": {
+      "name": "Vorrat abfragen",
+      "description": "Gibt zurück, was im Vorrat ist.",
+      "fields": {
+        "product": {
+          "name": "Produktfilter",
+          "description": "Teil eines Produktnamens."
+        }
+      }
+    }
+  }
+}

@@ -1,0 +1,302 @@
+"""REST routes. Each one is a thin wrapper around a service function."""
+
+from __future__ import annotations
+
+import secrets
+from collections.abc import AsyncIterator
+from typing import Annotated
+
+from fastapi import APIRouter, Depends, File, HTTPException, Request, UploadFile
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from . import API_VERSION, __version__
+from .config import SUPERVISOR_INGRESS_IP, Settings
+from .events import EventHub
+from .schemas import (
+    ChoreExecuteIn,
+    ChoreIn,
+    ChoreOut,
+    ConsumeIn,
+    LineMatchIn,
+    LocationIn,
+    LocationOut,
+    OpenIn,
+    PersonIn,
+    PersonOut,
+    ProductIn,
+    ProductOut,
+    ProductPatch,
+    PurchaseIn,
+    ReceiptLineOut,
+    ReceiptOut,
+    ReceiptSummaryOut,
+    ShoppingItemIn,
+    ShoppingItemOut,
+    ShoppingItemPatch,
+    ShoppingListOut,
+    StockItemOut,
+    StockTxnOut,
+    TaskIn,
+    TaskOut,
+    TaskPatch,
+)
+from .services import catalog, chores, people, receipts, shopping, stock, summary, tasks
+
+
+def is_authorized(request_headers, client_host: str | None, query_token: str | None, settings: Settings) -> bool:
+    """Bearer token, HA ingress (only from the Supervisor's proxy), or trust-all for local development."""
+    if settings.trust_all:
+        return True
+    auth = request_headers.get("authorization", "")
+    token = auth.removeprefix("Bearer ").strip() if auth.startswith("Bearer ") else query_token
+    if token and secrets.compare_digest(token, settings.api_token):
+        return True
+    return client_host == SUPERVISOR_INGRESS_IP and bool(request_headers.get("x-remote-user-id"))
+
+
+async def require_auth(request: Request) -> None:
+    host = request.client.host if request.client else None
+    if not is_authorized(request.headers, host, request.query_params.get("token"), request.app.state.settings):
+        raise HTTPException(status_code=401, detail="Missing or invalid token")
+
+
+async def get_session(request: Request) -> AsyncIterator[AsyncSession]:
+    async with request.app.state.db.sessions() as session:
+        yield session
+
+
+def get_hub(request: Request) -> EventHub:
+    return request.app.state.hub
+
+
+def get_actor(request: Request) -> str | None:
+    """Who is acting: the HA user from ingress, or what the integration passes along."""
+    return request.headers.get("x-steward-actor") or request.headers.get("x-remote-user-id")
+
+
+Session = Annotated[AsyncSession, Depends(get_session)]
+Hub = Annotated[EventHub, Depends(get_hub)]
+Actor = Annotated[str | None, Depends(get_actor)]
+
+router = APIRouter(prefix="/api", dependencies=[Depends(require_auth)])
+
+
+@router.get("/info")
+async def info() -> dict:
+    return {"name": "Steward", "version": __version__, "api_version": API_VERSION}
+
+
+@router.get("/summary")
+async def get_summary(session: Session) -> dict:
+    return await summary.summary(session)
+
+
+# --- people ---------------------------------------------------------------
+
+
+@router.get("/people", response_model=list[PersonOut])
+async def list_people(session: Session):
+    return await people.list_people(session)
+
+
+@router.put("/people", response_model=list[PersonOut])
+async def sync_people(session: Session, hub: Hub, body: list[PersonIn]):
+    return await people.sync(session, hub, body)
+
+
+# --- catalog --------------------------------------------------------------
+
+
+@router.get("/locations", response_model=list[LocationOut])
+async def list_locations(session: Session):
+    return await catalog.list_locations(session)
+
+
+@router.post("/locations", response_model=LocationOut)
+async def create_location(session: Session, hub: Hub, body: LocationIn):
+    return await catalog.create_location(session, hub, body)
+
+
+@router.get("/products", response_model=list[ProductOut])
+async def list_products(session: Session):
+    return await catalog.list_products(session)
+
+
+@router.post("/products", response_model=ProductOut)
+async def create_product(session: Session, hub: Hub, body: ProductIn):
+    return await catalog.create_product(session, hub, body)
+
+
+@router.patch("/products/{product_id}", response_model=ProductOut)
+async def update_product(session: Session, hub: Hub, product_id: int, body: ProductPatch):
+    return await catalog.update_product(session, hub, product_id, body)
+
+
+@router.delete("/products/{product_id}", status_code=204)
+async def delete_product(session: Session, hub: Hub, product_id: int) -> None:
+    await catalog.delete_product(session, hub, product_id)
+
+
+# --- stock ----------------------------------------------------------------
+
+
+@router.get("/stock", response_model=list[StockItemOut])
+async def get_stock(session: Session, include_empty: bool = False):
+    return await stock.stock_overview(session, include_empty=include_empty)
+
+
+@router.get("/stock/journal", response_model=list[StockTxnOut])
+async def get_journal(session: Session, limit: int = 100):
+    return await stock.journal(session, limit)
+
+
+@router.post("/stock/purchase")
+async def post_purchase(session: Session, hub: Hub, actor: Actor, body: PurchaseIn) -> dict:
+    entry = await stock.purchase(
+        session,
+        hub,
+        body.product_id,
+        body.amount,
+        due_date=body.due_date,
+        location_id=body.location_id,
+        unit_price=body.unit_price,
+        actor=actor,
+    )
+    return {"entry_id": entry.id}
+
+
+@router.post("/stock/consume")
+async def post_consume(session: Session, hub: Hub, actor: Actor, body: ConsumeIn) -> dict:
+    taken = await stock.consume(session, hub, body.product_id, body.amount, spoiled=body.spoiled, actor=actor)
+    return {"consumed": taken}
+
+
+@router.post("/stock/open", status_code=204)
+async def post_open(session: Session, hub: Hub, actor: Actor, body: OpenIn) -> None:
+    await stock.open_product(session, hub, body.product_id, body.amount, actor=actor)
+
+
+@router.post("/stock/undo/{txn_id}", status_code=204)
+async def post_undo(session: Session, hub: Hub, txn_id: int) -> None:
+    await stock.undo(session, hub, txn_id)
+
+
+# --- shopping -------------------------------------------------------------
+
+
+@router.get("/shopping-lists", response_model=list[ShoppingListOut])
+async def get_lists(session: Session):
+    return await shopping.lists(session)
+
+
+@router.get("/shopping-lists/{list_id}/items", response_model=list[ShoppingItemOut])
+async def get_items(session: Session, list_id: int):
+    return await shopping.items(session, list_id)
+
+
+@router.post("/shopping-lists/{list_id}/items", response_model=ShoppingItemOut)
+async def add_item(session: Session, hub: Hub, list_id: int, body: ShoppingItemIn):
+    return await shopping.add_item(session, hub, list_id, body)
+
+
+@router.post("/shopping-lists/{list_id}/add-missing")
+async def add_missing(session: Session, hub: Hub, list_id: int) -> dict:
+    return {"added": await shopping.add_missing(session, hub, list_id)}
+
+
+@router.post("/shopping-lists/{list_id}/clear-done")
+async def clear_done(session: Session, hub: Hub, list_id: int) -> dict:
+    return {"removed": await shopping.clear_done(session, hub, list_id)}
+
+
+@router.patch("/shopping-items/{item_id}", response_model=ShoppingItemOut)
+async def update_item(session: Session, hub: Hub, item_id: int, body: ShoppingItemPatch):
+    return await shopping.update_item(session, hub, item_id, body)
+
+
+@router.delete("/shopping-items/{item_id}", status_code=204)
+async def delete_item(session: Session, hub: Hub, item_id: int) -> None:
+    await shopping.delete_item(session, hub, item_id)
+
+
+# --- chores ---------------------------------------------------------------
+
+
+@router.get("/chores", response_model=list[ChoreOut])
+async def list_chores(session: Session):
+    return await chores.list_chores(session)
+
+
+@router.post("/chores", response_model=ChoreOut)
+async def create_chore(session: Session, hub: Hub, body: ChoreIn):
+    return await chores.create_chore(session, hub, body)
+
+
+@router.delete("/chores/{chore_id}", status_code=204)
+async def delete_chore(session: Session, hub: Hub, chore_id: int) -> None:
+    await chores.delete_chore(session, hub, chore_id)
+
+
+@router.post("/chores/{chore_id}/execute", response_model=ChoreOut)
+async def execute_chore(session: Session, hub: Hub, chore_id: int, body: ChoreExecuteIn | None = None):
+    body = body or ChoreExecuteIn()
+    return await chores.execute(session, hub, chore_id, person_id=body.person_id, skipped=body.skipped)
+
+
+@router.get("/chores/history")
+async def chore_history(session: Session, chore_id: int | None = None, limit: int = 100) -> list[dict]:
+    return [
+        {"id": log.id, "chore_id": log.chore_id, "done_at": log.done_at, "done_by": log.done_by, "skipped": log.skipped}
+        for log in await chores.history(session, chore_id, limit)
+    ]
+
+
+# --- tasks ----------------------------------------------------------------
+
+
+@router.get("/tasks", response_model=list[TaskOut])
+async def list_tasks(session: Session, include_done: bool = True):
+    return await tasks.list_tasks(session, include_done)
+
+
+@router.post("/tasks", response_model=TaskOut)
+async def create_task(session: Session, hub: Hub, body: TaskIn):
+    return await tasks.create_task(session, hub, body)
+
+
+@router.patch("/tasks/{task_id}", response_model=TaskOut)
+async def update_task(session: Session, hub: Hub, task_id: int, body: TaskPatch):
+    return await tasks.update_task(session, hub, task_id, body)
+
+
+@router.delete("/tasks/{task_id}", status_code=204)
+async def delete_task(session: Session, hub: Hub, task_id: int) -> None:
+    await tasks.delete_task(session, hub, task_id)
+
+
+# --- receipts -------------------------------------------------------------
+
+
+@router.get("/receipts", response_model=list[ReceiptSummaryOut])
+async def list_receipts(session: Session):
+    return await receipts.list_receipts(session)
+
+
+@router.post("/receipts", response_model=ReceiptOut)
+async def upload_receipt(session: Session, hub: Hub, file: UploadFile = File(...)):
+    return await receipts.import_ebon(session, hub, await file.read())
+
+
+@router.get("/receipts/{receipt_id}", response_model=ReceiptOut)
+async def get_receipt(session: Session, receipt_id: int):
+    return await receipts.get_receipt(session, receipt_id)
+
+
+@router.put("/receipts/{receipt_id}/lines/{line_id}", response_model=ReceiptLineOut)
+async def match_line(session: Session, hub: Hub, receipt_id: int, line_id: int, body: LineMatchIn):
+    return await receipts.set_line_product(session, hub, receipt_id, line_id, body)
+
+
+@router.post("/receipts/{receipt_id}/stock")
+async def stock_receipt(session: Session, hub: Hub, actor: Actor, receipt_id: int) -> dict:
+    return {"stocked": await receipts.stock_receipt(session, hub, receipt_id, actor)}

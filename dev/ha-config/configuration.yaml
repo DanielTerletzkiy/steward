@@ -1,0 +1,17 @@
+# Development Home Assistant for Steward. Everything else in this folder is generated and git-ignored.
+default_config:
+
+homeassistant:
+  name: Steward Demo
+  time_zone: Europe/Berlin
+  country: DE
+  language: en
+  currency: EUR
+  unit_system: metric
+  allowlist_external_dirs:
+    - /share
+
+logger:
+  default: info
+  logs:
+    custom_components.steward: debug
