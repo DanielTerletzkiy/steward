@@ -15,7 +15,7 @@ jobs:
         working-directory: server
     steps:
       - uses: actions/checkout@v7
-      - uses: astral-sh/setup-uv@v10
+      - uses: astral-sh/setup-uv@v10.3.3
       - run: uv sync --locked
       # The eBon parser's own metadata pulls in dev tools; its runtime needs only the server's dependencies.
       - run: uv pip install --no-deps rewe-ebon-parser
@@ -28,7 +28,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
-      - uses: astral-sh/setup-uv@v10
+      - uses: astral-sh/setup-uv@v10.3.3
       - run: uvx ruff check server custom_components
 
   frontend:
