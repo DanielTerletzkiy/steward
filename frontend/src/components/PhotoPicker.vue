@@ -1,6 +1,10 @@
 <script setup lang="ts">
 import { onBeforeUnmount, ref, watch } from 'vue'
 import { t } from '@/i18n'
+import { cameraAvailable } from '@/composables/barcode'
+import { notifyError } from '@/composables/notify'
+import { preparePhoto } from '@/composables/photos'
+import CameraDialog from './CameraDialog.vue'
 
 // Take a photo with the camera or pick one from the device, with a preview.
 const file = defineModel<File | null>({ default: null })
@@ -33,11 +37,28 @@ watch(
 )
 onBeforeUnmount(() => preview.value && URL.revokeObjectURL(preview.value))
 
-function picked(e: Event) {
+const cameraOpen = ref(false)
+const preparing = ref(false)
+
+/** The live camera where the browser allows it; otherwise the system's camera through a file input. */
+function takePhoto() {
+  if (cameraAvailable()) cameraOpen.value = true
+  else cameraInput.value?.click()
+}
+
+async function picked(e: Event) {
   const input = e.target as HTMLInputElement
   const f = input.files?.[0]
-  if (f) file.value = f
-  input.value = ''
+  if (!f) return
+  preparing.value = true
+  try {
+    file.value = await preparePhoto(f)
+  } catch (err) {
+    notifyError(err)
+  } finally {
+    preparing.value = false
+    input.value = ''
+  }
 }
 </script>
 
@@ -53,12 +74,13 @@ function picked(e: Event) {
       </v-responsive>
     </v-sheet>
     <div class="d-flex flex-wrap ga-2 mt-2">
-      <v-btn class="flex-grow-1" variant="tonal" color="primary" prepend-icon="mdi-camera-outline" @click="cameraInput?.click()">{{ t.wardrobe.takePhoto }}</v-btn>
-      <v-btn class="flex-grow-1" variant="tonal" prepend-icon="mdi-image-outline" @click="galleryInput?.click()">{{ t.wardrobe.choosePhoto }}</v-btn>
+      <v-btn class="flex-grow-1" variant="tonal" color="primary" prepend-icon="mdi-camera-outline" :disabled="preparing" @click="takePhoto">{{ t.wardrobe.takePhoto }}</v-btn>
+      <v-btn class="flex-grow-1" variant="tonal" prepend-icon="mdi-image-outline" :loading="preparing" @click="galleryInput?.click()">{{ t.wardrobe.choosePhoto }}</v-btn>
       <v-btn v-if="removable && (file || props.currentUrl)" variant="tonal" icon="mdi-image-remove-outline" size="small" class="align-self-center" :title="t.common.removePhoto" @click="remove" />
     </div>
     <input ref="cameraInput" type="file" accept="image/*" capture="environment" hidden @change="picked" />
     <input ref="galleryInput" type="file" accept="image/*" hidden @change="picked" />
+    <CameraDialog v-model="cameraOpen" @captured="file = $event" @fallback="cameraInput?.click()" />
   </div>
 </template>
 

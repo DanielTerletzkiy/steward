@@ -8,6 +8,8 @@ import { conditionIcon, conditionLabel, forecastParts } from '@/composables/weat
 import AiProviderDialog from '@/components/AiProviderDialog.vue'
 import ConfirmDialog from '@/components/ConfirmDialog.vue'
 import EmptyState from '@/components/EmptyState.vue'
+import EmailImportCard from '@/components/EmailImportCard.vue'
+import LocationsCard from '@/components/LocationsCard.vue'
 import type { AiJob, AiProvider, AiProviderIn, AiSettings, Forecast, WeatherSettings } from '@/types'
 
 const { data: ai, loading: aiLoading, error: aiError, reload: reloadAi } = useResource<AiSettings | null>(() => api.aiSettings(), ['settings'], null)
@@ -312,6 +314,22 @@ loadForecast()
     </template>
 
     <!-- Wardrobe -->
+    <!-- Storage locations -->
+    <div class="d-flex align-center mb-1">
+      <v-icon icon="mdi-fridge-outline" class="mr-2" color="primary" />
+      <div class="text-h6">{{ t.locations.title }}</div>
+    </div>
+    <div class="text-body-2 text-medium-emphasis mb-4" style="max-width: 680px">{{ t.locations.intro }}</div>
+    <LocationsCard />
+
+    <!-- Receipts from email -->
+    <div class="d-flex align-center mb-1">
+      <v-icon icon="mdi-email-arrow-left-outline" class="mr-2" color="primary" />
+      <div class="text-h6">{{ t.email.title }}</div>
+    </div>
+    <div class="text-body-2 text-medium-emphasis mb-4" style="max-width: 680px">{{ t.email.intro }}</div>
+    <EmailImportCard />
+
     <div class="d-flex align-center mb-1">
       <v-icon icon="mdi-hanger" class="mr-2" color="primary" />
       <div class="text-h6">{{ t.settings.wardrobe }}</div>

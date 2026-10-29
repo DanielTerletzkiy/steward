@@ -1,4 +1,4 @@
-"""Settings: AI providers per job, and the weather source."""
+"""Settings: AI providers per job, the weather source, and importing eBons from email."""
 
 from __future__ import annotations
 
@@ -9,7 +9,7 @@ from fastapi import APIRouter, Depends
 from pydantic import BaseModel
 
 from ..api import Bridge, Hub, Session, require_auth
-from ..services import ai, weather
+from ..services import ai, mail, weather
 from ..services import settings as settings_store
 
 router = APIRouter(prefix="/api/settings", dependencies=[Depends(require_auth)])
@@ -56,3 +56,24 @@ async def put_weather_settings(session: Session, hub: Hub, body: WeatherSettings
 @router.get("/weather/forecast")
 async def forecast(session: Session, bridge: Bridge, day: date | None = None) -> dict[str, Any]:
     return await weather.for_day(session, bridge, day)
+
+
+@router.get("/email")
+async def get_email(session: Session) -> dict[str, Any]:
+    return mail.public_config(await mail.load_config(session))
+
+
+@router.put("/email")
+async def put_email(session: Session, hub: Hub, body: dict[str, Any]) -> dict[str, Any]:
+    return await mail.save_config(session, hub, body)
+
+
+@router.post("/email/test")
+async def test_email(session: Session, body: dict[str, Any] | None = None) -> dict[str, Any]:
+    """Sign in with the form's values (the stored password if none is given): folders and matching mails."""
+    return await mail.test(session, body)
+
+
+@router.post("/email/run")
+async def run_email(session: Session, hub: Hub) -> dict[str, Any]:
+    return await mail.run(session, hub)

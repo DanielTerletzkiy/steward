@@ -140,14 +140,18 @@ async function consumeOne(productId: number, spoiled = false) {
               <v-card-text>
                 <div class="text-caption d-flex align-center">
                   {{ t.today.deposit }}
-                  <v-tooltip :text="t.today.depositHint" location="top">
+                  <v-tooltip :text="`${t.today.depositHint}. ${t.today.bottlesHint}`" location="top" max-width="320">
                     <template #activator="{ props }"><v-icon v-bind="props" icon="mdi-information-outline" size="14" class="ml-1" /></template>
                   </v-tooltip>
                 </div>
                 <div class="text-h5 font-weight-bold text-tabular" :class="data.spending.deposit_balance < 0 ? 'text-warning' : ''">
                   {{ formatEuro(data.spending.deposit_balance) }}
                 </div>
-                <div class="text-caption">{{ t.today.depositSub }}</div>
+                <div class="text-caption">
+                  <template v-if="!data.spending.deposit_bottles?.bought && !data.spending.deposit_bottles?.returned">{{ t.today.depositSub }}</template>
+                  <template v-else-if="data.spending.deposit_bottles.open >= 0">{{ t.today.bottlesOpen(data.spending.deposit_bottles.open) }}</template>
+                  <template v-else>{{ t.today.bottlesOver(-data.spending.deposit_bottles.open) }}</template>
+                </div>
               </v-card-text>
             </v-card>
           </v-col>

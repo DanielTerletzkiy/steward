@@ -163,6 +163,11 @@ export interface ReceiptLine {
   confidence: number
   method: 'alias' | 'fuzzy' | 'manual' | string | null
   confirmed: boolean
+  /** Pieces in one unit, e.g. 6 bottles in a 6-pack; stocking adds qty × pieces. */
+  pieces: number | null
+  pieces_source: 'learned' | 'deposit' | 'name' | 'manual' | null
+  /** Deposit and bottle-return lines: bottles or cans they stand for. */
+  bottles: number | null
 }
 
 export interface Receipt {
@@ -213,6 +218,8 @@ export interface Summary {
     month_trips: number
     total_spent: number
     deposit_balance: number
+    /** Bottles and cans paid deposit for, returned, and open (bought − returned) since the first receipt. */
+    deposit_bottles: { bought: number; returned: number; open: number }
     last_trip: { receipt_id: number; store: string | null; at: string; total: number; items: number } | null
   }
   people: Record<string, { name: string; chores_due: string[] }>
@@ -703,3 +710,29 @@ export interface MealPlanIn {
   note?: string | null
   servings?: number | null
 }
+
+export interface EmailImportRun {
+  at: string
+  mails: number
+  imported: number
+  known: number
+  skipped: number
+  error?: string
+}
+
+export interface EmailImportSettings {
+  enabled: boolean
+  host: string
+  port: number
+  username: string
+  password_set: boolean
+  folder: string
+  sender: string
+  mark_read: boolean
+  interval_minutes: number
+  since_days: number
+  last_run?: EmailImportRun | null
+}
+
+/** What the form sends; a password left out keeps the stored one. */
+export type EmailImportIn = Partial<Omit<EmailImportSettings, 'password_set' | 'last_run'>> & { password?: string }

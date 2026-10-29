@@ -7,6 +7,7 @@ import { onTopics } from '@/composables/live'
 import { useResource } from '@/composables/resource'
 import { useCatalog } from '@/composables/catalog'
 import { attempt, notify } from '@/composables/notify'
+import { preparePhoto } from '@/composables/photos'
 import { formatAmount, formatDate, formatDateTime, formatEuro, mdiIcon, parseDateTime, relativeDue, relativeTime } from '@/composables/format'
 import { docIcon, formatSize, useManualSearch, warrantyChip } from '@/composables/equipment'
 import EmptyState from '@/components/EmptyState.vue'
@@ -82,7 +83,7 @@ async function photoPicked(ev: Event) {
   input.value = ''
   if (!file || !item.value) return
   photoBusy.value = true
-  const res = await attempt(() => api.setEquipmentPhoto(props.id, file))
+  const res = await attempt(async () => api.setEquipmentPhoto(props.id, await preparePhoto(file)))
   photoBusy.value = false
   if (res) {
     item.value = res

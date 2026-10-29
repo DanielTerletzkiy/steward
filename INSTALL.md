@@ -115,7 +115,14 @@ The simplest choice is manual installation until the repository is public.
   3. Choose what happens to the laundry: **Track the laundry bin** (start = in the wash, done = drying), **Ask me when it's done**, or leave it as it is.
   4. Add a chore like "Hang up the laundry" and link it, so it becomes due when the washer finishes.
 - **Robot vacuum:** link it the same way. A finished run completes its chore, and Steward can start it and send it to the dock.
-- **Receipts:** put REWE eBon PDFs into HA's `/share` folder to import them.
+- **Storage locations:** Settings → Storage locations. Add Fridge, Freezer, Pantry and so on. Then pick a usual place for each product.
+- **Receipts:** upload eBon PDFs, or let Steward fetch them from your mailbox:
+  1. Settings → Receipts from email → **Gmail**.
+  2. Create an app password at [myaccount.google.com/apppasswords](https://myaccount.google.com/apppasswords). This needs 2-step verification on the Google account.
+  3. Enter your address and the app password, then **Test connection**.
+  4. Turn on **Check the mailbox regularly** and **Save**.
+
+  If your eBons skip the inbox (a filter or label), set the folder to `[Gmail]/All Mail`, or `[Gmail]/Alle Nachrichten` with Gmail in German.
 - **Notifications:** Steward fires `steward_appliance_finished` and `steward_appliance_started` in HA. Use them as automation triggers.
 
 ## Direct access without the sidebar (optional)

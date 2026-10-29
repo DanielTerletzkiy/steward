@@ -7,6 +7,7 @@ import { useResource } from '@/composables/resource'
 import { useCatalog } from '@/composables/catalog'
 import { consume, openProduct } from '@/composables/stockActions'
 import { formatAmount, formatDate, formatEuro, relativeExpiry } from '@/composables/format'
+import { attempt, notify } from '@/composables/notify'
 import EmptyState from '@/components/EmptyState.vue'
 import StatusChip from '@/components/StatusChip.vue'
 import PurchaseDialog from '@/components/PurchaseDialog.vue'
@@ -60,7 +61,7 @@ const visible = computed(() => {
   const q = search.value.trim().toLowerCase()
   return items.value
     .filter((i) => {
-      if (location.value != null && i.product.location_id !== location.value) return false
+      if (location.value != null && i.product.location_id !== location.value && !i.entries.some((e) => e.location_id === location.value)) return false
       if (q && !`${i.product.name} ${i.product.brand ?? ''} ${i.product.category ?? ''}`.toLowerCase().includes(q)) return false
       switch (filter.value) {
         case 'in_stock': return i.amount > 0
@@ -109,6 +110,12 @@ function locationIcon(name?: string) {
 
 const purchaseFor = ref<Product | null>(null)
 const purchaseOpen = ref(false)
+async function moveEntry(entryId: number, locationId: number | null) {
+  if (!(await attempt(() => api.moveEntry(entryId, locationId)))) return
+  notify(locationId != null ? t.stock.moved(locationsById.value.get(locationId)?.name ?? '') : t.stock.movedNowhere)
+  reload()
+}
+
 function openPurchase(p: Product) {
   purchaseFor.value = p
   purchaseOpen.value = true
@@ -224,7 +231,20 @@ const expanded = ref<number | null>(null)
                       <tr v-for="e in i.entries" :key="e.id">
                         <td class="text-tabular">{{ formatAmount(e.amount, i.product.unit) }}</td>
                         <td>{{ e.due_date ? formatDate(e.due_date) : '–' }}</td>
-                        <td class="d-none d-sm-table-cell">{{ e.location_id != null ? locationsById.get(e.location_id)?.name : '' }}</td>
+                        <td>
+                          <v-menu location="bottom">
+                            <template #activator="{ props }">
+                              <v-btn v-bind="props" variant="text" size="small" class="px-1 text-none" :prepend-icon="e.location_id != null && locationsById.get(e.location_id)?.is_freezer ? 'mdi-snowflake' : 'mdi-map-marker-outline'" :title="t.stock.moveTo">
+                                {{ e.location_id != null ? locationsById.get(e.location_id)?.name : t.common.noLocation }}
+                              </v-btn>
+                            </template>
+                            <v-list density="compact">
+                              <v-list-subheader>{{ t.stock.moveTo }}</v-list-subheader>
+                              <v-list-item v-for="l in state.locations" :key="l.id" :title="l.name" :active="l.id === e.location_id" :prepend-icon="l.is_freezer ? 'mdi-snowflake' : 'mdi-map-marker-outline'" @click="moveEntry(e.id, l.id)" />
+                              <v-list-item :title="t.common.noLocation" :active="e.location_id == null" prepend-icon="mdi-map-marker-off-outline" @click="moveEntry(e.id, null)" />
+                            </v-list>
+                          </v-menu>
+                        </td>
                         <td>{{ e.unit_price != null ? formatEuro(e.unit_price) : '' }}</td>
                         <td><v-icon v-if="e.opened_at" icon="mdi-package-variant-closed-remove" size="16" :title="t.status.opened" /></td>
                       </tr>

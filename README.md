@@ -68,6 +68,22 @@ Each module seeds only when its own tables are empty. Delete `dev/data/` to star
 
 The integration authenticates with `STEWARD_API_TOKEN` (`dev-token` in the demo). `STEWARD_TRUST_ALL=true` still exists for quick local development, but don't use it outside localhost; the app ignores it.
 
+## Stock and receipts
+
+- **Storage locations:** Settings → Storage locations (Fridge, Freezer, Pantry, …), or "New location …" in any location picker.
+  - Products have a usual place.
+  - Single batches can be moved, e.g. into the freezer, from the batch list in Stock.
+- **Packs:** a receipt line can stand for several pieces ("ZERO LEMON" = 6 bottles), and stocking adds that many. Steward works it out:
+  1. from what you set before for the same text at the same price;
+  2. from the deposit line after it (PFAND 1,50 EURO = 6 × 0,25 €);
+  3. from the name ("6X1,5L").
+
+  Correct it on the line.
+- **Bottle deposit:** the deposit card shows the money balance and how many bottles and cans are still to take back (bought with deposit minus returned).
+- **eBons from email:** Settings → Receipts from email. Steward checks a mailbox over IMAP every 15 minutes (configurable) for mails from REWE with a PDF and imports them.
+  - Gmail needs an app password.
+  - The mailbox is opened read-only, unless imported mails should be marked as read.
+
 ## AI
 
 Open Steward → Settings → AI to choose a provider for each job (scanning groceries, tagging clothes, suggesting outfits):

@@ -1,6 +1,6 @@
 # Home Assistant app manifest. Build the installable folder with dev/scripts/build_app.sh.
 name: Steward
-version: "0.1.0"
+version: "0.2.0"
 slug: steward
 url: https://github.com/DanielTerletzkiy/steward
 description: Household management for Home Assistant - stock, shopping, chores, receipts, equipment and wardrobe

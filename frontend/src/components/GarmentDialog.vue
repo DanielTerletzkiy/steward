@@ -5,6 +5,7 @@ import { api, fileUrl } from '@/api'
 import { LOCALE, t } from '@/i18n'
 import { useCatalog } from '@/composables/catalog'
 import { attempt, notify, notifyError } from '@/composables/notify'
+import { preparePhoto } from '@/composables/photos'
 import { label, swatch, useVocabulary } from '@/composables/wardrobe'
 import PhotoPicker from './PhotoPicker.vue'
 import AiProblemAlert from './AiProblemAlert.vue'
@@ -118,10 +119,16 @@ const suggestedName = computed(() => {
 })
 const tempText = computed(() => (form.value.tempSet ? t.wardrobe.tempValue(form.value.temp[0], form.value.temp[1]) : t.wardrobe.tempAny))
 
-function carePicked(e: Event) {
+async function carePicked(e: Event) {
   const input = e.target as HTMLInputElement
-  careLabel.value = input.files?.[0] ?? null
+  const file = input.files?.[0]
   input.value = ''
+  if (!file) return
+  try {
+    careLabel.value = await preparePhoto(file)
+  } catch (err) {
+    notifyError(err)
+  }
 }
 
 /** Let the AI look at the photo (and care label) and prefill the form; the user checks and saves. */

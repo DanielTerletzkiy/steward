@@ -8,6 +8,7 @@ from sqlalchemy import JSON, Boolean, Date, DateTime, Float, ForeignKey, Integer
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from .db import Base
+from .deposit import line_bottles
 from .timeutil import today, utcnow
 
 
@@ -193,6 +194,14 @@ class ReceiptLine(Base):
     total: Mapped[float] = mapped_column(Float)
     tax: Mapped[str | None] = mapped_column(String, nullable=True)
     kind: Mapped[str] = mapped_column(String, default="item")  # item / deposit / deposit_return / bag
+    # Pieces in one unit of this line, e.g. 6 bottles in "ZERO LEMON" (a 6-pack). Stocking adds qty x pieces.
+    # NULL until worked out (receipts imported before this existed are filled in at startup).
+    pieces: Mapped[float | None] = mapped_column(Float, nullable=True)
+    pieces_source: Mapped[str | None] = mapped_column(String, nullable=True)  # learned / deposit / name / manual
+
+    @property
+    def bottles(self) -> int | None:
+        return line_bottles(self.kind, self.raw_text, self.qty, self.unit_price, self.total)
     product_id: Mapped[int | None] = mapped_column(ForeignKey("product.id", ondelete="SET NULL"), nullable=True)
     confidence: Mapped[float] = mapped_column(Float, default=0)
     method: Mapped[str | None] = mapped_column(String, nullable=True)  # alias / fuzzy / manual
@@ -210,6 +219,21 @@ class ReceiptAlias(Base):
     normalized: Mapped[str] = mapped_column(String)
     product_id: Mapped[int] = mapped_column(ForeignKey("product.id", ondelete="CASCADE"))
     hits: Mapped[int] = mapped_column(Integer, default=0)
+
+
+class ReceiptPack(Base):
+    """Pieces per pack for a receipt text at a price, learned when the user corrects it.
+
+    The price tells a 6-pack from a single bottle that has the same receipt text."""
+
+    __tablename__ = "receipt_pack"
+    __table_args__ = (UniqueConstraint("chain", "normalized", "price_cents"),)
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    chain: Mapped[str] = mapped_column(String)
+    normalized: Mapped[str] = mapped_column(String)
+    price_cents: Mapped[int] = mapped_column(Integer)
+    pieces: Mapped[float] = mapped_column(Float)
 
 
 class StoredFile(Base):

@@ -26,7 +26,7 @@ from .routes import recipes as recipe_routes
 from .routes import scan as scan_routes
 from .routes import settings as settings_routes
 from .routes import wardrobe as wardrobe_routes
-from .services import ServiceError
+from .services import ServiceError, receipts
 from .services.files import FileStore
 
 LOG = logging.getLogger("steward")
@@ -43,6 +43,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         app.state.settings, app.state.db, app.state.hub = settings, db, EventHub()
         app.state.files = FileStore(settings.data_dir)
         app.state.bridge = HABridge()
+        async with db.sessions() as session:
+            await receipts.backfill_pieces(session)
         if settings.seed_demo:
             from .seed import seed_demo
 
@@ -50,9 +52,12 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                 await seed_demo(session, app.state.hub, app.state.files, settings.demo_receipts_dir)
         LOG.info("Steward %s ready, data in %s", __version__, settings.data_dir)
         await supervisor.announce(settings)
-        housekeeping = asyncio.create_task(_housekeeping(db, app.state.hub))
+        stop = asyncio.Event()
+        housekeeping = asyncio.create_task(_housekeeping(db, app.state.hub, stop))
         yield
-        housekeeping.cancel()
+        # Let a running job finish: cancelling it in the middle of a database call can hang the shutdown.
+        stop.set()
+        await housekeeping
         await db.dispose()
 
     app = FastAPI(title="Steward", version=__version__, lifespan=lifespan)
@@ -110,17 +115,23 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     return app
 
 
-async def _housekeeping(db: Database, hub: EventHub) -> None:
-    """Small periodic jobs: drying clothes become available again."""
-    from .services import wardrobe
+async def _housekeeping(db: Database, hub: EventHub, stop: asyncio.Event) -> None:
+    """Small periodic jobs: drying clothes become available again, new eBons are fetched from email."""
+    from .services import mail, wardrobe
 
     while True:
-        try:
-            async with db.sessions() as session:
-                await wardrobe.release_dried(session, hub)
-        except Exception:  # noqa: BLE001 - keep the loop alive; the next round retries
-            LOG.exception("Housekeeping failed")
-        await asyncio.sleep(300)
+        for job in (wardrobe.release_dried, mail.run_if_due):
+            try:
+                async with db.sessions() as session:
+                    await job(session, hub)
+            except Exception:  # noqa: BLE001 - keep the loop alive; the next round retries
+                LOG.exception("Housekeeping failed")
+            if stop.is_set():
+                return
+        with contextlib.suppress(TimeoutError):
+            await asyncio.wait_for(stop.wait(), 300)
+        if stop.is_set():
+            return
 
 
 async def _receive(websocket: WebSocket, bridge: HABridge, queue: asyncio.Queue) -> None:

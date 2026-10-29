@@ -97,6 +97,8 @@ SENSORS: tuple[StewardSensorDescription, ...] = (
         native_unit_of_measurement="EUR",
         suggested_display_precision=2,
         value=lambda d: _spending(d)["deposit_balance"],
+        # Bottles and cans: bought with deposit, returned, and still to take back (bought - returned).
+        attributes=lambda d: {f"bottles_{k}": v for k, v in (_spending(d).get("deposit_bottles") or {}).items()},
     ),
     StewardSensorDescription(
         key="chores_due",

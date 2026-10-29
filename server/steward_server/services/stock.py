@@ -8,7 +8,7 @@ from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..events import EventHub
-from ..models import Product, StockEntry, StockTxn
+from ..models import Location, Product, StockEntry, StockTxn
 from ..schemas import ProductOut, StockEntryOut, StockItemOut, StockTxnOut
 from ..timeutil import LOCAL_TZ, today, utcnow
 from . import Invalid, NotFound
@@ -274,6 +274,19 @@ async def _auto_add_to_shopping_list(session: AsyncSession, product: Product) ->
     from .shopping import ensure_on_list  # local import: shopping imports stock
 
     await ensure_on_list(session, product, product.min_stock - amount)
+
+
+async def move_entry(session: AsyncSession, hub: EventHub, entry_id: int, location_id: int | None) -> StockEntry:
+    """Put one lot somewhere else (e.g. into the freezer). Amounts don't change, so nothing is logged."""
+    entry = await session.get(StockEntry, entry_id)
+    if entry is None:
+        raise NotFound(f"Stock entry {entry_id} not found")
+    if location_id is not None and await session.get(Location, location_id) is None:
+        raise NotFound(f"Location {location_id} not found")
+    entry.location_id = location_id
+    await session.commit()
+    hub.publish("stock")
+    return entry
 
 
 async def txn_ids_after(session: AsyncSession, after_id: int) -> list[int]:

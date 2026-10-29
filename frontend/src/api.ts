@@ -5,7 +5,7 @@ import type {
   GarmentIn, GarmentState, Location, ManualHit, Me, Outfit, OutfitIn, Person, Product, ProductIn, Receipt, ReceiptLine,
   ReceiptSummary, RecognizedItem, EquipmentRun, HaDevice, HaEntity, ScanLookup, ScanMode, ScanResult, ShoppingItem, ShoppingList, StockItem, StockTxn,
   StyleProfile, Summary, Task, TaskIn, WardrobeVocabulary, WeatherSettings,
-  Fulfillment, MealPlanEntry, MealPlanIn, Recipe, RecipeIn, RecipeSuggestion,
+  Fulfillment, MealPlanEntry, MealPlanIn, Recipe, RecipeIn, RecipeSuggestion, StockEntry, EmailImportIn, EmailImportRun, EmailImportSettings,
 } from './types'
 
 export class ApiError extends Error {
@@ -69,6 +69,8 @@ export const api = {
   people: () => get<Person[]>('people'),
   locations: () => get<Location[]>('locations'),
   createLocation: (name: string, is_freezer = false) => post<Location>('locations', { name, is_freezer }),
+  updateLocation: (id: number, body: { name?: string; is_freezer?: boolean }) => patch<Location>(`locations/${id}`, body),
+  deleteLocation: (id: number) => del(`locations/${id}`),
 
   products: () => get<Product[]>('products'),
   createProduct: (body: ProductIn) => post<Product>('products', body),
@@ -76,6 +78,7 @@ export const api = {
   deleteProduct: (id: number) => del(`products/${id}`),
 
   stock: (includeEmpty = true) => get<StockItem[]>(`stock?include_empty=${includeEmpty}`),
+  moveEntry: (entryId: number, location_id: number | null) => put<StockEntry>(`stock/entries/${entryId}/location`, { location_id }),
   journal: (limit = 100) => get<StockTxn[]>(`stock/journal?limit=${limit}`),
   purchase: (body: { product_id: number; amount: number; due_date?: string | null; location_id?: number | null; unit_price?: number | null }) =>
     post<{ entry_id: number; txn_ids: number[] }>('stock/purchase', body),
@@ -114,6 +117,8 @@ export const api = {
   },
   matchLine: (receiptId: number, lineId: number, body: { product_id: number } | { new_product: ProductIn }) =>
     put<ReceiptLine>(`receipts/${receiptId}/lines/${lineId}`, body),
+  setLinePieces: (receiptId: number, lineId: number, pieces: number) =>
+    put<ReceiptLine>(`receipts/${receiptId}/lines/${lineId}/pieces`, { pieces }),
   stockReceipt: (id: number) => post<{ stocked: number }>(`receipts/${id}/stock`),
 
   equipmentList: () => get<Equipment[]>('equipment'),
@@ -156,6 +161,10 @@ export const api = {
   weatherSettings: () => get<WeatherSettings>('settings/weather'),
   saveWeatherSettings: (body: { entity_id?: string | null; latitude?: number | null; longitude?: number | null }) =>
     put<unknown>('settings/weather', body),
+  emailSettings: () => get<EmailImportSettings>('settings/email'),
+  saveEmailSettings: (body: EmailImportIn) => put<EmailImportSettings>('settings/email', body),
+  testEmail: (body: EmailImportIn) => post<{ ok: boolean; folders: string[]; matches: number }>('settings/email/test', body),
+  runEmailImport: () => post<EmailImportRun>('settings/email/run'),
   forecast: (day?: string | null) => get<Forecast>(`settings/weather/forecast${query({ day })}`),
 
   suggestOutfits: (body: { owner?: string | null; occasion: string; count?: number; lang: string }) =>

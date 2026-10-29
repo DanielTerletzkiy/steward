@@ -6,11 +6,12 @@ import { useCatalog } from '@/composables/catalog'
 import { attempt, notify } from '@/composables/notify'
 import ConfirmDialog from './ConfirmDialog.vue'
 import type { Product, ProductIn } from '@/types'
+import LocationSelect from './LocationSelect.vue'
 
 const open = defineModel<boolean>({ default: false })
 const props = defineProps<{ product?: Product | null; initialName?: string }>()
 const emit = defineEmits<{ saved: [Product] }>()
-const { state, categories, units } = useCatalog()
+const { categories, units } = useCatalog()
 
 const empty = (): ProductIn & { aliases: string } => ({
   name: '', brand: null, category: null, location_id: null, unit: 'Stk', min_stock: 0, due_days: null, due_type: 'best_before', aliases: '',
@@ -84,7 +85,7 @@ async function remove() {
             <v-col cols="12" sm="6"><v-text-field v-model="form.brand" :label="t.common.brand" /></v-col>
             <v-col cols="12" sm="6"><v-combobox v-model="form.category" :label="t.common.category" :items="categories" /></v-col>
             <v-col cols="12" sm="6">
-              <v-select v-model="form.location_id" :label="t.common.location" :items="state.locations" item-title="name" item-value="id" clearable />
+              <LocationSelect v-model="form.location_id" />
             </v-col>
             <v-col cols="12" sm="6"><v-combobox v-model="form.unit" :label="t.common.unit" :items="units" /></v-col>
             <v-col cols="6"><v-text-field v-model.number="form.min_stock" :label="t.stock.minStock" type="number" min="0" step="any" /></v-col>

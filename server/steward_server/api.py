@@ -19,9 +19,12 @@ from .schemas import (
     ChoreIn,
     ChoreOut,
     ConsumeIn,
+    EntryMoveIn,
     LineMatchIn,
+    LinePiecesIn,
     LocationIn,
     LocationOut,
+    LocationPatch,
     OpenIn,
     PersonIn,
     PersonOut,
@@ -36,6 +39,7 @@ from .schemas import (
     ShoppingItemOut,
     ShoppingItemPatch,
     ShoppingListOut,
+    StockEntryOut,
     StockItemOut,
     StockTxnOut,
     TaskIn,
@@ -162,6 +166,16 @@ async def create_location(session: Session, hub: Hub, body: LocationIn):
     return await catalog.create_location(session, hub, body)
 
 
+@router.patch("/locations/{location_id}", response_model=LocationOut)
+async def update_location(session: Session, hub: Hub, location_id: int, body: LocationPatch):
+    return await catalog.update_location(session, hub, location_id, body)
+
+
+@router.delete("/locations/{location_id}", status_code=204)
+async def delete_location(session: Session, hub: Hub, location_id: int) -> None:
+    await catalog.delete_location(session, hub, location_id)
+
+
 @router.get("/products", response_model=list[ProductOut])
 async def list_products(session: Session):
     return await catalog.list_products(session)
@@ -223,6 +237,11 @@ async def post_open(session: Session, hub: Hub, actor: Actor, body: OpenIn) -> d
     before = await stock.last_txn_id(session)
     await stock.open_product(session, hub, body.product_id, body.amount, actor=actor)
     return {"txn_ids": await stock.txn_ids_after(session, before)}
+
+
+@router.put("/stock/entries/{entry_id}/location", response_model=StockEntryOut)
+async def move_entry(session: Session, hub: Hub, entry_id: int, body: EntryMoveIn):
+    return await stock.move_entry(session, hub, entry_id, body.location_id)
 
 
 @router.post("/stock/undo/{txn_id}", status_code=204)
@@ -344,6 +363,11 @@ async def get_receipt(session: Session, receipt_id: int):
 @router.put("/receipts/{receipt_id}/lines/{line_id}", response_model=ReceiptLineOut)
 async def match_line(session: Session, hub: Hub, receipt_id: int, line_id: int, body: LineMatchIn):
     return await receipts.set_line_product(session, hub, receipt_id, line_id, body)
+
+
+@router.put("/receipts/{receipt_id}/lines/{line_id}/pieces", response_model=ReceiptLineOut)
+async def set_line_pieces(session: Session, hub: Hub, receipt_id: int, line_id: int, body: LinePiecesIn):
+    return await receipts.set_line_pieces(session, hub, receipt_id, line_id, body.pieces)
 
 
 @router.post("/receipts/{receipt_id}/stock")

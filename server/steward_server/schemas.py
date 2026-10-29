@@ -45,6 +45,11 @@ class LocationIn(BaseModel):
     is_freezer: bool = False
 
 
+class LocationPatch(BaseModel):
+    name: str | None = None
+    is_freezer: bool | None = None
+
+
 class LocationOut(ORM):
     id: int
     name: str
@@ -112,6 +117,10 @@ class StockItemOut(BaseModel):
     below_min: bool
     value: float
     entries: list[StockEntryOut]
+
+
+class EntryMoveIn(BaseModel):
+    location_id: int | None
 
 
 class PurchaseIn(BaseModel):
@@ -267,6 +276,10 @@ class ReceiptLineOut(ORM):
     confidence: float
     method: str | None
     confirmed: bool
+    pieces: float | None
+    pieces_source: str | None
+    # Deposit and bottle-return lines: how many bottles or cans they stand for (None if unknown).
+    bottles: int | None = None
 
 
 class ReceiptOut(ORM):
@@ -292,6 +305,10 @@ class ReceiptSummaryOut(ORM):
     line_count: int
     matched: int
     unmatched: int
+
+
+class LinePiecesIn(BaseModel):
+    pieces: float = Field(gt=0, le=1000)
 
 
 class LineMatchIn(BaseModel):

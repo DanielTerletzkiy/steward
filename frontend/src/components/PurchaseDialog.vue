@@ -2,13 +2,12 @@
 import { ref, watch } from 'vue'
 import { t } from '@/i18n'
 import { addDays, todayIso } from '@/composables/format'
-import { useCatalog } from '@/composables/catalog'
 import { purchase } from '@/composables/stockActions'
 import type { Product } from '@/types'
+import LocationSelect from './LocationSelect.vue'
 
 const open = defineModel<boolean>({ default: false })
 const props = defineProps<{ product: Product | null }>()
-const { state } = useCatalog()
 
 const amount = ref(1)
 const dueDate = ref<string | null>(null)
@@ -45,7 +44,7 @@ async function submit() {
         <v-form @submit.prevent="submit">
           <v-text-field v-model.number="amount" :label="t.common.amount" type="number" min="0" step="any" :suffix="product.unit" autofocus />
           <v-text-field v-model="dueDate" :label="t.common.dueDate" type="date" clearable :hint="product.due_type === 'expiration' ? t.stock.expiration : t.stock.bestBefore" persistent-hint class="mb-2" />
-          <v-select v-model="locationId" :label="t.common.location" :items="state.locations" item-title="name" item-value="id" clearable />
+          <LocationSelect v-model="locationId" />
           <v-text-field v-model="price" :label="t.stock.unitPrice" inputmode="decimal" prepend-inner-icon="mdi-currency-eur" :hint="t.common.optional" persistent-hint />
           <button type="submit" hidden />
         </v-form>

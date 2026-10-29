@@ -11,7 +11,8 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..events import EventHub
-from ..models import Product, Receipt, ReceiptAlias, ReceiptLine
+from ..deposit import pieces_from_name
+from ..models import Product, Receipt, ReceiptAlias, ReceiptLine, ReceiptPack
 from ..schemas import LineMatchIn, ReceiptSummaryOut
 from ..textnorm import as_receipt_name, normalize_receipt_text
 from ..timeutil import LOCAL_TZ, as_utc, today
@@ -101,12 +102,94 @@ async def import_ebon(session: AsyncSession, hub: EventHub, pdf: bytes, *, sourc
         )
     session.add(receipt)
     await session.flush()
+    await fill_pieces(session, receipt.lines)
     candidates = await _match_candidates(session)
     for line in receipt.lines:
         await match_line(session, line, candidates)
     await session.commit()
     hub.publish("receipts", receipt_id=receipt.id)
     return receipt
+
+
+def _price_cents(line: ReceiptLine) -> int:
+    """Price of one unit of the line, which tells a pack from a single item with the same text."""
+    qty = line.qty if line.qty > 0 else 1
+    return round(line.total / qty * 100)
+
+
+async def fill_pieces(session: AsyncSession, lines: list[ReceiptLine], *, force: bool = False) -> None:
+    """Work out pieces per unit for item lines: learned for this text and price, else from the deposit
+    line that follows (PFAND 1,50 EURO = 6 bottles), else from the text ("6X1,5L"), else 1."""
+    ordered = sorted(lines, key=lambda line: line.idx)
+    learned = {
+        (pack.normalized, pack.price_cents): pack.pieces
+        for pack in (await session.scalars(select(ReceiptPack).where(ReceiptPack.chain == CHAIN))).all()
+    }
+    for i, line in enumerate(ordered):
+        if line.kind != "item" or (line.pieces is not None and not force) or line.pieces_source == "manual":
+            continue
+        qty = line.qty if line.qty > 0 else 1
+        after = ordered[i + 1] if i + 1 < len(ordered) else None
+        bottles = after.bottles if after is not None and after.kind == "deposit" else None
+        if (pieces := learned.get((normalize_receipt_text(line.raw_text), _price_cents(line)))) is not None:
+            line.pieces, line.pieces_source = pieces, "learned"
+        elif bottles and bottles / qty >= 1 and bottles % qty == 0:
+            line.pieces, line.pieces_source = bottles / qty, "deposit"
+        elif (pieces := pieces_from_name(line.raw_text)) is not None:
+            line.pieces, line.pieces_source = float(pieces), "name"
+        else:
+            line.pieces, line.pieces_source = 1.0, None
+
+
+async def backfill_pieces(session: AsyncSession) -> None:
+    """Receipts imported before pieces per pack existed."""
+    receipt_ids = (
+        await session.scalars(
+            select(ReceiptLine.receipt_id).where(ReceiptLine.kind == "item", ReceiptLine.pieces.is_(None)).distinct()
+        )
+    ).all()
+    for receipt_id in receipt_ids:
+        receipt = await session.get(Receipt, receipt_id)
+        if receipt is not None:
+            await fill_pieces(session, receipt.lines)
+    if receipt_ids:
+        await session.commit()
+
+
+async def set_line_pieces(
+    session: AsyncSession, hub: EventHub, receipt_id: int, line_id: int, pieces: float
+) -> ReceiptLine:
+    """Correct pieces per pack. Remembered for this receipt text at this price, and applied to open receipts."""
+    line = await session.get(ReceiptLine, line_id)
+    if line is None or line.receipt_id != receipt_id or line.kind != "item":
+        raise NotFound(f"Item line {line_id} not found on receipt {receipt_id}")
+    line.pieces, line.pieces_source = pieces, "manual"
+    normalized, price = normalize_receipt_text(line.raw_text), _price_cents(line)
+    pack = await session.scalar(
+        select(ReceiptPack).where(
+            ReceiptPack.chain == CHAIN, ReceiptPack.normalized == normalized, ReceiptPack.price_cents == price
+        )
+    )
+    if pack is None:
+        session.add(ReceiptPack(chain=CHAIN, normalized=normalized, price_cents=price, pieces=pieces))
+    else:
+        pack.pieces = pieces
+    await session.flush()
+    open_receipts = (await session.scalars(select(Receipt).where(Receipt.stocked.is_(False)))).all()
+    for receipt in open_receipts:
+        same = [
+            other
+            for other in receipt.lines
+            if other.id != line.id
+            and other.pieces_source != "manual"
+            and normalize_receipt_text(other.raw_text) == normalized
+            and _price_cents(other) == price
+        ]
+        for other in same:
+            other.pieces, other.pieces_source = pieces, "learned"
+    await session.commit()
+    hub.publish("receipts", receipt_id=receipt_id)
+    return line
 
 
 async def get_receipt(session: AsyncSession, receipt_id: int) -> Receipt:
@@ -183,13 +266,14 @@ async def stock_receipt(session: AsyncSession, hub: EventHub, receipt_id: int, a
     for line in receipt.lines:
         if line.kind != "item" or line.product_id is None:
             continue
-        qty = line.qty if line.qty > 0 else 1
+        # A 6-pack bought once goes into stock as 6 bottles.
+        amount = (line.qty if line.qty > 0 else 1) * (line.pieces or 1)
         await purchase(
             session,
             hub,
             line.product_id,
-            qty,
-            unit_price=round(line.total / qty, 4),
+            amount,
+            unit_price=round(line.total / amount, 4),
             actor=actor,
             source="receipt",
             receipt_line_id=line.id,
@@ -213,14 +297,16 @@ async def spending(session: AsyncSession) -> dict:
     now = today()
     month = [r for r in receipts if as_utc(r.at).astimezone(LOCAL_TZ).date().replace(day=1) == now.replace(day=1)]
     last = receipts[0] if receipts else None
-    deposit = sum(
-        line.total for r in receipts for line in r.lines if line.kind in ("deposit", "deposit_return")
-    )
+    deposit_lines = [line for r in receipts for line in r.lines if line.kind in ("deposit", "deposit_return")]
+    bought = sum(line.bottles or 0 for line in deposit_lines if line.kind == "deposit")
+    returned = sum(line.bottles or 0 for line in deposit_lines if line.kind == "deposit_return")
     return {
         "month_total": round(sum(r.total for r in month), 2),
         "month_trips": len(month),
         "total_spent": round(sum(r.total for r in receipts), 2),
-        "deposit_balance": round(deposit, 2),
+        # Money paid as deposit minus money back for returns, and the same in bottles and cans.
+        "deposit_balance": round(sum(line.total for line in deposit_lines), 2),
+        "deposit_bottles": {"bought": bought, "returned": returned, "open": bought - returned},
         "last_trip": {
             "receipt_id": last.id,
             "store": last.store,

@@ -3,13 +3,17 @@ import { computed, onBeforeUnmount, ref } from 'vue'
 import { api } from '@/api'
 import { t } from '@/i18n'
 import { useCatalog } from '@/composables/catalog'
-import { attempt, notify } from '@/composables/notify'
+import { attempt, notify, notifyError } from '@/composables/notify'
 import { addDays, todayIso } from '@/composables/format'
 import { aiProblem, type AiProblem } from '@/composables/aiErrors'
 import { runScanAction } from '@/composables/scanActions'
+import { cameraAvailable } from '@/composables/barcode'
+import { preparePhoto } from '@/composables/photos'
 import AiProblemAlert from './AiProblemAlert.vue'
+import CameraDialog from './CameraDialog.vue'
 import EmptyState from './EmptyState.vue'
 import type { Product, RecognizedItem } from '@/types'
+import LocationSelect from './LocationSelect.vue'
 
 const { state, productsById, categories, units } = useCatalog()
 
@@ -19,13 +23,31 @@ const hint = ref('')
 const cameraInput = ref<HTMLInputElement | null>(null)
 const galleryInput = ref<HTMLInputElement | null>(null)
 
-function picked(e: Event) {
+const cameraOpen = ref(false)
+const preparing = ref(false)
+
+function addPhoto(file: File) {
+  if (photos.value.length < MAX) photos.value.push({ file, url: URL.createObjectURL(file) })
+}
+
+/** The live camera where the browser allows it; otherwise the system's camera through a file input. */
+function takePhoto() {
+  if (cameraAvailable()) cameraOpen.value = true
+  else cameraInput.value?.click()
+}
+
+async function picked(e: Event) {
   const input = e.target as HTMLInputElement
-  for (const file of Array.from(input.files ?? [])) {
-    if (photos.value.length >= MAX) break
-    photos.value.push({ file, url: URL.createObjectURL(file) })
+  const files = Array.from(input.files ?? []).slice(0, MAX - photos.value.length)
+  preparing.value = true
+  try {
+    for (const file of files) addPhoto(await preparePhoto(file))
+  } catch (err) {
+    notifyError(err)
+  } finally {
+    preparing.value = false
+    input.value = ''
   }
-  input.value = ''
 }
 function removePhoto(i: number) {
   URL.revokeObjectURL(photos.value[i].url)
@@ -142,19 +164,20 @@ function reset() {
             color="surface-container"
             rounded="lg"
             class="photo-tile d-flex flex-column align-center justify-center clickable text-medium-emphasis"
-            @click="cameraInput?.click()"
+            @click="takePhoto"
           >
             <v-icon icon="mdi-camera-plus-outline" size="32" class="mb-1" />
             <span class="text-caption">{{ t.scan.addPhoto }}</span>
           </v-sheet>
         </div>
         <div class="d-flex flex-wrap ga-2 mb-3">
-          <v-btn variant="tonal" color="primary" prepend-icon="mdi-camera-outline" :disabled="photos.length >= MAX" @click="cameraInput?.click()">{{ t.wardrobe.takePhoto }}</v-btn>
-          <v-btn variant="tonal" prepend-icon="mdi-image-multiple-outline" :disabled="photos.length >= MAX" @click="galleryInput?.click()">{{ t.wardrobe.choosePhoto }}</v-btn>
+          <v-btn variant="tonal" color="primary" prepend-icon="mdi-camera-outline" :disabled="photos.length >= MAX || preparing" @click="takePhoto">{{ t.wardrobe.takePhoto }}</v-btn>
+          <v-btn variant="tonal" prepend-icon="mdi-image-multiple-outline" :disabled="photos.length >= MAX" :loading="preparing" @click="galleryInput?.click()">{{ t.wardrobe.choosePhoto }}</v-btn>
           <span class="text-caption text-medium-emphasis align-self-center">{{ t.scan.maxPhotos }}</span>
         </div>
         <input ref="cameraInput" type="file" accept="image/*" capture="environment" hidden @change="picked" />
         <input ref="galleryInput" type="file" accept="image/*" multiple hidden @change="picked" />
+        <CameraDialog v-model="cameraOpen" @captured="addPhoto" @fallback="cameraInput?.click()" />
         <v-text-field v-model="hint" :label="t.scan.hint" :placeholder="t.scan.hintPlaceholder" persistent-placeholder hide-details class="mb-3" />
         <v-btn color="primary" variant="flat" size="large" block prepend-icon="mdi-creation" :disabled="!photos.length" :loading="busy" @click="recognize">{{ t.scan.recognize }}</v-btn>
         <v-expand-transition>
@@ -209,7 +232,7 @@ function reset() {
               />
             </v-col>
             <v-col cols="12" sm="4">
-              <v-select v-model="r.locationId" :items="state.locations" item-title="name" item-value="id" :label="t.common.location" clearable />
+              <LocationSelect v-model="r.locationId" />
             </v-col>
           </v-row>
         </v-card-text>
