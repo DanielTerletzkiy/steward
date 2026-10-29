@@ -25,9 +25,11 @@ from .routes import files as file_routes
 from .routes import recipes as recipe_routes
 from .routes import scan as scan_routes
 from .routes import settings as settings_routes
+from .routes import terminals as terminal_routes
 from .routes import wardrobe as wardrobe_routes
 from .services import ServiceError, receipts
 from .services.files import FileStore
+from .services.terminals import Registry
 
 LOG = logging.getLogger("steward")
 STATIC_DIR = Path(__file__).parent / "static"
@@ -43,8 +45,10 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         app.state.settings, app.state.db, app.state.hub = settings, db, EventHub()
         app.state.files = FileStore(settings.data_dir)
         app.state.bridge = HABridge()
+        app.state.terminals = Registry()
         async with db.sessions() as session:
             await receipts.backfill_pieces(session)
+            await app.state.terminals.load(session)
         if settings.seed_demo:
             from .seed import seed_demo
 
@@ -63,7 +67,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app = FastAPI(title="Steward", version=__version__, lifespan=lifespan)
     app.include_router(router)
     app.include_router(auth_router)
-    for module in (file_routes, equipment_routes, wardrobe_routes, scan_routes, settings_routes, recipe_routes):
+    for module in (file_routes, equipment_routes, wardrobe_routes, scan_routes, settings_routes, recipe_routes, terminal_routes):
         app.include_router(module.router)
 
     @app.exception_handler(ServiceError)
@@ -74,7 +78,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     async def events(websocket: WebSocket) -> None:
         host = websocket.client.host if websocket.client else None
         await websocket.accept()
-        if not is_authorized(websocket.headers, host, websocket.query_params.get("token"), settings):
+        token = websocket.query_params.get("token")
+        if not is_authorized(websocket.headers, host, token, settings, websocket.app.state.terminals):
             # Accept first: a close before the handshake reaches the browser as 1006, not 4401.
             await websocket.close(code=4401)
             return

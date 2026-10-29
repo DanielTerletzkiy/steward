@@ -23,6 +23,8 @@ from . import Invalid, NotFound, ai, catalog, shopping, stock
 LOG = logging.getLogger("steward.scan")
 
 MODES = ("purchase", "consume", "open", "spoil", "shopping", "lookup")
+# Printed mode cards: scanning "STEWARD-MODE-CONSUME" switches a scanner station to that mode.
+MODE_CARD = re.compile(r"STEWARD-MODE-(PURCHASE|CONSUME|OPEN|SPOIL|SHOPPING)", re.IGNORECASE)
 LOOKUP_TTL = timedelta(days=30)
 OFF_FIELDS = "product_name,product_name_en,product_name_de,brands,quantity,categories_tags,image_front_small_url,image_front_url"
 OFF_SITES = ("https://world.openfoodfacts.org", "https://world.openproductsfacts.org")
@@ -241,6 +243,8 @@ async def apply(
     """A scan with a mode, as a barcode scanner station does it: act on a known product right away."""
     if mode not in MODES:
         raise Invalid(f"mode must be one of: {', '.join(MODES)}")
+    if card := MODE_CARD.fullmatch(raw.strip()):
+        return {"code": raw.strip(), "mode": mode, "done": False, "mode_switch": card.group(1).lower()}
     found = await lookup(session, raw)
     if found["product_id"] is None or mode == "lookup":
         return {**found, "mode": mode, "done": False}
@@ -248,7 +252,11 @@ async def apply(
     barcode = await session.get(Barcode, found["code"])
     amount = amount or (barcode.amount if barcode else 1)
     due = date.fromisoformat(found["due_date"]) if found.get("due_date") else None
+    if mode in ("consume", "spoil", "open") and await stock.amount_in_stock(session, product.id) <= 0:
+        # Nothing to take: the station says so instead of failing, and can offer to correct the stock.
+        return {**found, "mode": mode, "done": False, "not_in_stock": True, "product_name": product.name}
     before = await stock.last_txn_id(session)
+    result: dict[str, Any] = {}
     if mode == "purchase":
         await stock.purchase(session, hub, product.id, amount, due_date=due, actor=actor, source=source)
     elif mode in ("consume", "spoil"):
@@ -257,9 +265,14 @@ async def apply(
         await stock.open_product(session, hub, product.id, amount, actor=actor)
     elif mode == "shopping":
         target = await shopping.default_list(session)
-        await shopping.add_item(session, hub, target.id, ShoppingItemIn(product_id=product.id, amount=amount))
+        item = await shopping.add_item(session, hub, target.id, ShoppingItemIn(product_id=product.id, amount=amount))
+        result["shopping_item_id"] = item.id
     txn_ids = await stock.txn_ids_after(session, before)
-    return {**found, "mode": mode, "done": True, "amount": amount, "product_name": product.name, "txn_ids": txn_ids}
+    return {
+        **found, **result, "mode": mode, "done": True, "amount": amount, "product_name": product.name,
+        "unit": product.unit, "txn_ids": txn_ids, "in_stock": await stock.amount_in_stock(session, product.id),
+        "on_shopping_list": await shopping.is_on_list(session, product.id),
+    }  # fmt: skip
 
 
 # --- photos ---------------------------------------------------------------

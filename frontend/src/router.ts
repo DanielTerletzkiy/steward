@@ -16,6 +16,7 @@ const views = {
   recipes: () => import('./views/RecipesView.vue'),
   recipe: () => import('./views/RecipeDetailView.vue'),
   mealplan: () => import('./views/MealPlanView.vue'),
+  kiosk: () => import('./views/KioskView.vue'),
 }
 
 export const router = createRouter({
@@ -37,6 +38,8 @@ export const router = createRouter({
     { path: '/recipes', name: 'recipes', component: views.recipes },
     { path: '/recipes/:id', name: 'recipe', component: views.recipe, props: (r) => ({ id: Number(r.params.id) }) },
     { path: '/mealplan', name: 'mealplan', component: views.mealplan },
+    // The kitchen terminal: full screen, no navigation (see App.vue).
+    { path: '/kiosk', name: 'kiosk', component: views.kiosk, meta: { kiosk: true } },
     { path: '/:pathMatch(.*)*', redirect: '/' },
   ],
   scrollBehavior: () => ({ top: 0 }),

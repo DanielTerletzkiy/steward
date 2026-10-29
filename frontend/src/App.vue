@@ -58,6 +58,8 @@ const section = computed(() => {
   return parents[name] ?? name
 })
 const inMore = computed(() => moreNav.some((i) => i.name === section.value))
+// The kitchen terminal page is full screen: no navigation, no sign-in page.
+const kiosk = computed(() => route.meta.kiosk === true)
 
 const me = ref<Me | null>(null)
 
@@ -79,7 +81,7 @@ async function runToastAction() {
 
 <template>
   <v-app>
-    <v-navigation-drawer v-if="mdAndUp" permanent width="248" color="background" border="0">
+    <v-navigation-drawer v-if="mdAndUp && !kiosk" permanent width="248" color="background" border="0">
       <div class="d-flex align-center px-5 pt-5 pb-3">
         <v-avatar color="primary" size="36" rounded="lg" class="mr-3"><v-icon icon="mdi-home-heart" /></v-avatar>
         <div>
@@ -138,7 +140,7 @@ async function runToastAction() {
       </template>
     </v-navigation-drawer>
 
-    <v-app-bar v-if="!mdAndUp" flat density="comfortable" color="background">
+    <v-app-bar v-if="!mdAndUp && !kiosk" flat density="comfortable" color="background">
       <template #prepend>
         <v-avatar color="primary" size="32" rounded="lg" class="ml-2"><v-icon icon="mdi-home-heart" size="20" /></v-avatar>
       </template>
@@ -158,14 +160,14 @@ async function runToastAction() {
     </v-app-bar>
 
     <v-main>
-      <div v-if="auth.failed" class="page">
+      <div v-if="auth.failed && !kiosk" class="page">
         <EmptyState icon="mdi-account-lock-outline" :title="t.auth.needed" :text="t.auth.neededHint">
           <v-btn color="primary" variant="flat" prepend-icon="mdi-login" :href="loginUrl()">{{ t.auth.signIn }}</v-btn>
         </EmptyState>
       </div>
       <template v-else>
         <v-alert
-          v-if="showOffline && mdAndUp"
+          v-if="showOffline && mdAndUp && !kiosk"
           type="warning"
           variant="tonal"
           density="compact"
@@ -182,7 +184,7 @@ async function runToastAction() {
       </template>
     </v-main>
 
-    <v-bottom-navigation v-if="!mdAndUp" :model-value="inMore ? 'more' : section" grow color="primary" height="64">
+    <v-bottom-navigation v-if="!mdAndUp && !kiosk" :model-value="inMore ? 'more' : section" grow color="primary" height="64">
       <v-btn v-for="n in bottomNav" :key="n.name" :value="n.name" :to="n.to">
         <v-icon :icon="section === n.name ? n.activeIcon : n.icon" />
         <span>{{ n.label }}</span>
@@ -233,7 +235,7 @@ async function runToastAction() {
       :timeout="toasts.current?.timeout ?? 3500"
       :color="toasts.current?.color"
       location="bottom"
-      :class="mdAndUp ? '' : 'mb-16'"
+      :class="mdAndUp || kiosk ? '' : 'mb-16'"
       rounded="lg"
     >
       {{ toasts.current?.text }}

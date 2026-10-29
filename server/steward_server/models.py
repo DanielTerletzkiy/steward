@@ -439,6 +439,20 @@ class Setting(Base):
     value: Mapped[dict | list | str | int | float | bool | None] = mapped_column(JSON, nullable=True)
 
 
+class Terminal(Base):
+    """A kitchen terminal: a browser that stays signed in after pairing, with access to stock only."""
+
+    __tablename__ = "terminal"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    name: Mapped[str] = mapped_column(String)
+    secret_hash: Mapped[str | None] = mapped_column(String, nullable=True)  # set when paired
+    pair_code_hash: Mapped[str | None] = mapped_column(String, nullable=True, index=True)
+    pair_expires: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    last_seen: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+
 class BarcodeLookup(Base):
     """Cached Open Food Facts / Open Products Facts answers (also "not found", to avoid asking again)."""
 

@@ -48,20 +48,23 @@ export const cameraAvailable = () => window.isSecureContext && !!navigator.media
 
 /**
  * Keyboard-wedge scanners type the code very fast and press Enter. Collect such bursts anywhere on the
- * page (but not while the user types into a field) and report them as scans.
+ * page and report them as scans. Bursts typed into a field are ignored, unless `inFields` is set (the
+ * kiosk page): then the field also gets the characters, and the caller clears it in `onCode`.
  */
-export function useWedgeScanner(onCode: (code: string) => void) {
+export function useWedgeScanner(onCode: (code: string) => void, opts: { inFields?: boolean } = {}) {
   let buffer = ''
   let last = 0
   function onKey(e: KeyboardEvent) {
     const target = e.target as HTMLElement | null
-    if (target && (target.isContentEditable || ['INPUT', 'TEXTAREA', 'SELECT'].includes(target.tagName))) return
+    const inField = target && (target.isContentEditable || ['INPUT', 'TEXTAREA', 'SELECT'].includes(target.tagName))
+    if (inField && !opts.inFields) return
     const now = performance.now()
     if (now - last > 60) buffer = ''
     last = now
     if (e.key === 'Enter') {
       if (buffer.length >= 6) {
         e.preventDefault()
+        e.stopPropagation()
         onCode(buffer)
       }
       buffer = ''

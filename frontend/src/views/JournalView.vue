@@ -41,7 +41,7 @@ async function undo(txn: StockTxn) {
           </v-list-item-title>
           <v-list-item-subtitle>
             {{ txn.type === 'correct' && txn.amount > 0 ? '+' : '' }}{{ formatAmount(txn.amount, productsById.get(txn.product_id)?.unit) }}<template v-if="txn.unit_price != null"> · {{ formatEuro(txn.unit_price) }}</template>
-            · {{ formatDateTime(txn.at) }} · {{ t.journal.sources[txn.source] ?? txn.source }}<template v-if="txn.actor"> · {{ txn.actor }}</template>
+            · {{ formatDateTime(txn.at) }} · {{ t.journal.sources[txn.source] ?? txn.source }}<template v-if="txn.actor_name || txn.actor"> · {{ txn.actor_name ?? txn.actor }}</template>
           </v-list-item-subtitle>
           <template #append>
             <v-chip v-if="txn.undone" variant="outlined" label>{{ t.journal.undone }}</v-chip>

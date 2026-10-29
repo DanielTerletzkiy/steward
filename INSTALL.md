@@ -133,6 +133,57 @@ For a wall tablet, or another machine on your network:
 2. In its Configuration tab, set **Home Assistant URL** to the address your browser uses for HA, e.g. `http://homeassistant.local:8123`.
 3. Open `http://homeassistant.local:8095` and click **Sign in with Home Assistant**.
 
+## Kitchen terminal (optional)
+
+A fixed screen in the kitchen for stock: scan what you use up, add what came without an eBon. It works with:
+- a Raspberry Pi (a Pi 400, 4 or 5) with Raspberry Pi OS with desktop and a screen;
+- a USB barcode scanner, which the Pi sees as a keyboard.
+
+The terminal opens Steward's kiosk page full screen. It stays signed in without a Home Assistant account and can only:
+- look at, use and add stock;
+- create products for unknown barcodes;
+- put things on the shopping list.
+
+It can't open settings, receipts or anything else.
+
+**Choosing a scanner:** any USB scanner that acts as a keyboard works (around 20–30 €).
+- It must send **Enter** after the code; most do by default.
+- If codes come out wrong (e.g. `ß` instead of `-`), the scanner types for a US keyboard. Set it to the German layout with the setup barcodes in its manual.
+
+**Set it up:**
+1. Give Steward a direct address: in the app's Network section, set a host port for `8095/tcp`, e.g. `8095`, and restart the app. The terminal can't go through Home Assistant's sidebar.
+2. In Steward, open Settings → **Kitchen terminals** → **Add terminal** and give it a name.
+   - Steward shows a pairing code and the command for the Pi.
+   - The code works once, for 15 minutes.
+3. On the Pi, open a terminal and paste the command:
+
+```bash
+curl -fsSL https://github.com/DanielTerletzkiy/steward/releases/latest/download/setup-pi.sh | bash -s -- '<pairing link>'
+```
+
+   The script:
+   - installs Chromium if needed;
+   - starts it at boot in kiosk mode on Steward's kiosk page;
+   - turns the screen off after 10 minutes without input (a key press or scan wakes it);
+   - logs in to the desktop automatically.
+
+   Options: `--blank-after 0` keeps the screen on; `--dry-run` only shows what it would change.
+4. Reboot the Pi. It opens the pairing link once and then the kiosk page.
+
+If the pairing link expired before the Pi started, the screen asks for a code: click **New pairing code** in Steward and type it on the Pi's keyboard.
+
+**Using it:**
+- **Use** is the default mode. **Add**, **Opened**, **Throw away** and **To list** switch back to Use after a minute without scanning.
+- **Mode cards:** Settings → Kitchen terminals → **Print mode cards**. Scanning a card switches the mode, so you don't need to touch the screen.
+- Every scan is booked right away. The last one shows large with **+**, **−**, **Use all** and **Undo**. Scanning the same product again within 15 seconds counts up.
+- **Items without a barcode:** tiles for what you use most often (bread, eggs), or search with the keyboard.
+- **Unknown barcode:** Steward looks it up on Open Food Facts. Create the product or link the code to one you have, and the scan is booked.
+- **History** shows the terminal's name next to what it booked.
+
+**Remove a terminal:** click the bin next to it in Settings → Kitchen terminals; it is signed out at once.
+
+**Back to the normal desktop on the Pi:** delete `~/.config/labwc/autostart` and `~/.local/bin/steward-kiosk`, then reboot.
+
 ## Without apps (HA Container)
 
 1. Run the server as a container next to Home Assistant; `dev/docker-compose.yml` shows how. Set:

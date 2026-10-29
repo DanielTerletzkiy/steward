@@ -89,6 +89,7 @@ export interface StockTxn {
   unit_price: number | null
   at: string
   actor: string | null
+  actor_name?: string | null
   source: string
   undone: boolean
 }
@@ -261,7 +262,7 @@ export interface Summary {
 
 export type Topic =
   | 'stock' | 'shopping' | 'chores' | 'tasks' | 'receipts' | 'people' | 'catalog'
-  | 'equipment' | 'wardrobe' | 'settings' | 'recipes' | 'mealplan'
+  | 'equipment' | 'wardrobe' | 'settings' | 'recipes' | 'mealplan' | 'terminals'
 
 export interface Me {
   user: { id: string; name: string } | null
@@ -608,6 +609,29 @@ export interface ScanResult extends ScanLookup {
   done: boolean
   amount?: number
   product_name?: string
+  unit?: string
+  txn_ids?: number[]
+  shopping_item_id?: number
+  in_stock?: number
+  on_shopping_list?: boolean
+  /** Nothing in stock to use, open or throw away. */
+  not_in_stock?: boolean
+  /** A printed mode card was scanned: switch to this mode. */
+  mode_switch?: ScanMode
+}
+
+export interface Terminal {
+  id: number
+  name: string
+  paired: boolean
+  created_at: string
+  last_seen: string | null
+}
+
+export interface TerminalPairing {
+  terminal: Terminal
+  code: string
+  expires: string
 }
 
 export interface RecognizedItem {

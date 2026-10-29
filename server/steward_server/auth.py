@@ -12,6 +12,7 @@ from __future__ import annotations
 import base64
 import hashlib
 import hmac
+import html
 import json
 import secrets
 import time
@@ -55,17 +56,21 @@ def verify(settings: Settings, value: str | None) -> dict[str, Any] | None:
     return payload if payload.get("exp", 0) > time.time() else None
 
 
-def session_user(headers, settings: Settings) -> dict[str, Any] | None:
+def read_cookie(headers, name: str) -> str | None:
     raw = headers.get("cookie")
     if not raw:
         return None
     cookie = SimpleCookie()
     try:
         cookie.load(raw)
-    except Exception:  # noqa: BLE001 - a malformed cookie header is simply no session
+    except Exception:  # noqa: BLE001 - a malformed cookie header is simply no cookie
         return None
-    morsel = cookie.get(COOKIE)
-    user = verify(settings, morsel.value if morsel else None)
+    morsel = cookie.get(name)
+    return morsel.value if morsel else None
+
+
+def session_user(headers, settings: Settings) -> dict[str, Any] | None:
+    user = verify(settings, read_cookie(headers, COOKIE))
     return user if user and user.get("kind") == "session" else None
 
 
@@ -111,6 +116,25 @@ async def callback(request: Request, code: str | None = None, state: str | None 
     return response
 
 
+@router.get("/terminal")
+async def pair_terminal(request: Request, code: str | None = None):
+    """Pair this browser as a kitchen terminal with the code from Settings → Kitchen terminals."""
+    from .services import ServiceError, terminals
+
+    origin = _origin(request)
+    try:
+        async with request.app.state.db.sessions() as session:
+            value = await terminals.redeem(session, request.app.state.hub, request.app.state.terminals, code or "")
+    except ServiceError as err:
+        return HTMLResponse(_page("Pairing failed", str(err), retry=f"{origin}/#/kiosk"), 400)
+    response = RedirectResponse(f"{origin}/#/kiosk", status_code=302)
+    response.set_cookie(
+        terminals.COOKIE, value, max_age=terminals.COOKIE_DAYS * 86400, httponly=True, samesite="lax",
+        secure=request.url.scheme == "https", path="/",
+    )  # fmt: skip
+    return response
+
+
 @router.get("/logout")
 async def logout(request: Request):
     response = RedirectResponse(f"{_origin(request)}/", status_code=302)
@@ -143,9 +167,10 @@ async def _who_is(ha_url: str, code: str, client_id: str) -> dict[str, Any]:
     return {"id": result["id"], "name": result.get("name") or "Home Assistant user", "is_admin": result.get("is_admin")}
 
 
-def _page(title: str, text: str) -> str:
+def _page(title: str, text: str, retry: str = "/auth/login") -> str:
+    title, text = html.escape(title), html.escape(text)
     return (
         "<!doctype html><meta name=viewport content='width=device-width'>"
         f"<title>{title}</title><body style='font:16px system-ui;margin:3rem;max-width:36rem'>"
-        f"<h1 style='font-size:1.4rem'>{title}</h1><p>{text}</p><p><a href='/auth/login'>Try again</a></p>"
+        f"<h1 style='font-size:1.4rem'>{title}</h1><p>{text}</p><p><a href='{html.escape(retry)}'>Try again</a></p>"
     )

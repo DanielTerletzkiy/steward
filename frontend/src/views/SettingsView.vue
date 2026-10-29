@@ -10,6 +10,7 @@ import ConfirmDialog from '@/components/ConfirmDialog.vue'
 import EmptyState from '@/components/EmptyState.vue'
 import EmailImportCard from '@/components/EmailImportCard.vue'
 import LocationsCard from '@/components/LocationsCard.vue'
+import TerminalsCard from '@/components/TerminalsCard.vue'
 import type { AiJob, AiProvider, AiProviderIn, AiSettings, Forecast, WeatherSettings } from '@/types'
 
 const { data: ai, loading: aiLoading, error: aiError, reload: reloadAi } = useResource<AiSettings | null>(() => api.aiSettings(), ['settings'], null)
@@ -321,6 +322,14 @@ loadForecast()
     </div>
     <div class="text-body-2 text-medium-emphasis mb-4" style="max-width: 680px">{{ t.locations.intro }}</div>
     <LocationsCard />
+
+    <!-- Kitchen terminals -->
+    <div class="d-flex align-center mb-1">
+      <v-icon icon="mdi-monitor-dashboard" class="mr-2" color="primary" />
+      <div class="text-h6">{{ t.terminals.title }}</div>
+    </div>
+    <div class="text-body-2 text-medium-emphasis mb-4" style="max-width: 680px">{{ t.terminals.intro }}</div>
+    <TerminalsCard />
 
     <!-- Receipts from email -->
     <div class="d-flex align-center mb-1">

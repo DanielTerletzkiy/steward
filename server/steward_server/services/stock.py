@@ -8,7 +8,7 @@ from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..events import EventHub
-from ..models import Location, Product, StockEntry, StockTxn
+from ..models import Location, Person, Product, StockEntry, StockTxn
 from ..schemas import EntryPatch, ProductOut, StockEntryOut, StockItemOut, StockTxnOut
 from ..timeutil import LOCAL_TZ, today, utcnow
 from . import Invalid, NotFound
@@ -242,6 +242,7 @@ async def undo(session: AsyncSession, hub: EventHub, txn_id: int) -> None:
 
 
 async def journal(session: AsyncSession, limit: int = 100) -> list[StockTxnOut]:
+    actor_names = await _actor_names(session)
     rows = (
         await session.execute(
             select(StockTxn, Product.name)
@@ -260,11 +261,43 @@ async def journal(session: AsyncSession, limit: int = 100) -> list[StockTxnOut]:
             unit_price=txn.unit_price,
             at=txn.at,
             actor=txn.actor,
+            actor_name=actor_names.get(txn.actor) if txn.actor else None,
             source=txn.source,
             undone=txn.undone,
         )
         for txn, name in rows
     ]
+
+
+async def amount_in_stock(session: AsyncSession, product_id: int) -> float:
+    return round(sum(e.amount for e in await _entries(session, product_id)), 6)
+
+
+async def _actor_names(session: AsyncSession) -> dict[str, str]:
+    """Readable names for the journal: HA users by their person, terminals by their name."""
+    from . import terminals
+
+    names = {p.user_id: p.name for p in (await session.scalars(select(Person))).all() if p.user_id}
+    names.update({f"terminal:{tid}": name for tid, name in (await terminals.names(session)).items()})
+    return names
+
+
+async def frequent_without_barcode(session: AsyncSession, limit: int = 12, days: int = 60) -> list[Product]:
+    """What is used most often but can't be scanned (bread, eggs, bananas): tiles on the kiosk page."""
+    since = utcnow() - timedelta(days=days)
+    uses = func.count(StockTxn.id)
+    rows = (
+        await session.execute(
+            select(Product, uses)
+            .join(StockTxn, StockTxn.product_id == Product.id)
+            .where(StockTxn.type == "consume", StockTxn.at >= since, StockTxn.undone.is_(False))
+            .where(~Product.barcodes.any())
+            .group_by(Product.id)
+            .order_by(uses.desc(), Product.name)
+            .limit(max(1, min(limit, 48)))
+        )
+    ).all()
+    return [product for product, _ in rows]
 
 
 async def _auto_add_to_shopping_list(session: AsyncSession, product: Product) -> None:

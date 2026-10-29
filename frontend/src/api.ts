@@ -5,7 +5,7 @@ import type {
   GarmentIn, GarmentState, Location, ManualHit, Me, Outfit, OutfitIn, Person, Product, ProductAliases, ProductIn, Receipt, ReceiptAlias, ReceiptLine,
   ReceiptSummary, RecognizedItem, EquipmentRun, HaDevice, HaEntity, ScanLookup, ScanMode, ScanResult, ShoppingItem, ShoppingList, StockItem, StockTxn,
   StyleProfile, Summary, Task, TaskIn, WardrobeVocabulary, WeatherSettings,
-  Fulfillment, MealPlanEntry, MealPlanIn, Recipe, RecipeIn, RecipeSuggestion, StockEntry, EmailImportIn, EmailImportRun, EmailImportSettings,
+  Fulfillment, MealPlanEntry, MealPlanIn, Recipe, RecipeIn, RecipeSuggestion, StockEntry, EmailImportIn, EmailImportRun, EmailImportSettings, Terminal, TerminalPairing,
 } from './types'
 
 export class ApiError extends Error {
@@ -64,6 +64,7 @@ const query = (params: Record<string, string | number | null | undefined>) => {
 }
 
 export const api = {
+  info: () => get<{ name: string; version: string }>('info'),
   summary: () => get<Summary>('summary'),
   me: () => get<Me>('me'),
   people: () => get<Person[]>('people'),
@@ -190,6 +191,11 @@ export const api = {
     if (hint) form.append('hint', hint)
     return post<{ items: RecognizedItem[] }>('scan/photo', form)
   },
+  terminals: () => get<{ terminals: Terminal[]; direct_url: string | null }>('terminals'),
+  createTerminal: (name: string) => post<TerminalPairing>('terminals', { name }),
+  newPairingCode: (id: number) => post<TerminalPairing>(`terminals/${id}/code`),
+  deleteTerminal: (id: number) => del(`terminals/${id}`),
+  frequentProducts: (limit = 12) => get<Product[]>(`kiosk/frequent?limit=${limit}`),
   addBarcode: (productId: number, code: string, amount = 1) => post<Product>(`products/${productId}/barcodes`, { code, amount }),
   removeBarcode: (productId: number, code: string) => request<Product>('DELETE', `products/${productId}/barcodes/${encodeURIComponent(code)}`),
 

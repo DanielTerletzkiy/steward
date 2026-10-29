@@ -1,6 +1,7 @@
 # Release: push a tag like v0.2.0 (matching `version` in app/config.yaml). This
 # - builds the app image for amd64 and aarch64 and pushes it to ghcr.io, where the app store pulls it;
-# - creates a GitHub release with zips for manual installation (the app folder and the integration).
+# - creates a GitHub release with zips for manual installation (the app folder and the integration),
+#   and the kitchen terminal's Raspberry Pi setup script.
 # Run it by hand (Actions → Release → Run workflow) to rebuild the images without a release.
 name: Release
 
@@ -108,4 +109,4 @@ jobs:
         run: |
           version=${{ needs.stage.outputs.version }}
           gh release create "$GITHUB_REF_NAME" --title "Steward $version" --generate-notes \
-            "dist/steward-app-$version.zip" "dist/steward-integration-$version.zip"
+            "dist/steward-app-$version.zip" "dist/steward-integration-$version.zip" kiosk/setup-pi.sh

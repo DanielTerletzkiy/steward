@@ -62,14 +62,14 @@ function connect() {
     if (ev.code === 4401) {
       // Not signed in (any more): sign in rather than retrying forever.
       requireLogin()
-      if (auth.failed) return
+      if (auth.failed || auth.unpaired) return
     } else if (!opened) {
       // A rejected handshake often arrives as a plain 1006 close; ask the API whether we are signed in.
       fetch('api/info', { credentials: 'same-origin' })
         .then((r) => r.status === 401 && requireLogin())
         .catch(() => undefined)
     }
-    if (auth.failed) return
+    if (auth.failed || auth.unpaired) return
     scheduleReconnect()
   }
   socket.onerror = () => socket?.close()

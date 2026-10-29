@@ -8,7 +8,12 @@ const GUARD_MS = 15000
 export const auth = reactive({
   /** Set when sign-in is needed but redirecting again would loop. */
   failed: false,
+  /** On the kiosk page: this browser is not (or no longer) a paired kitchen terminal. */
+  unpaired: false,
 })
+
+/** The kiosk page pairs with a code instead of signing in with Home Assistant. */
+export const onKioskPage = () => window.location.hash.startsWith('#/kiosk')
 
 export function loginUrl(): string {
   const next = window.location.hash && window.location.hash.startsWith('#/') ? window.location.hash : '#/'
@@ -25,6 +30,10 @@ function lastRedirect(): number {
 
 /** Go to the sign-in page, unless we just came back from it (then show the error state). */
 export function requireLogin(): void {
+  if (onKioskPage()) {
+    auth.unpaired = true
+    return
+  }
   if (auth.failed) return
   if (Date.now() - lastRedirect() < GUARD_MS) {
     auth.failed = true

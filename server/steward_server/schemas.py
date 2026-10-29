@@ -163,6 +163,7 @@ class StockTxnOut(BaseModel):
     unit_price: float | None
     at: UTCDatetime
     actor: str | None
+    actor_name: str | None = None
     source: str
     undone: bool
 
@@ -768,3 +769,30 @@ class MealPlanOut(ORM):
     note: str | None
     servings: int | None
     done: bool
+
+
+# --- kitchen terminals ----------------------------------------------------
+
+
+class TerminalIn(BaseModel):
+    name: str
+
+
+class TerminalOut(BaseModel):
+    id: int
+    name: str
+    paired: bool
+    created_at: UTCDatetime
+    last_seen: UTCDatetime | None
+
+
+class TerminalPairOut(BaseModel):
+    terminal: TerminalOut
+    code: str
+    expires: UTCDatetime
+
+
+class TerminalsOut(BaseModel):
+    terminals: list[TerminalOut]
+    # Where a terminal reaches Steward directly (the app's host port), when the server knows it.
+    direct_url: str | None

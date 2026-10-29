@@ -10,7 +10,7 @@ from fastapi import APIRouter, Depends, File, HTTPException, Request, UploadFile
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from . import API_VERSION, __version__
-from .auth import session_user
+from .auth import read_cookie, session_user
 from .config import SUPERVISOR_INGRESS_IP, Settings
 from .events import EventHub
 from .ha_bridge import HABridge
@@ -51,13 +51,17 @@ from .schemas import (
     TaskOut,
     TaskPatch,
 )
-from .services import catalog, chores, people, receipts, shopping, stock, summary, tasks
+from .services import catalog, chores, people, receipts, shopping, stock, summary, tasks, terminals
 from .services.files import FileStore
+from .services.terminals import COOKIE as TERMINAL_COOKIE
+from .services.terminals import Registry
 
 
-def is_authorized(request_headers, client_host: str | None, query_token: str | None, settings: Settings) -> bool:
+def is_authorized(
+    request_headers, client_host: str | None, query_token: str | None, settings: Settings, registry: Registry | None = None
+) -> bool:
     """Bearer token, HA ingress (only from the Supervisor's proxy), a "Sign in with Home Assistant"
-    session cookie, or trust-all for local development."""
+    session cookie, a paired kitchen terminal, or trust-all for local development."""
     if settings.trust_all:
         return True
     auth = request_headers.get("authorization", "")
@@ -66,7 +70,16 @@ def is_authorized(request_headers, client_host: str | None, query_token: str | N
         return True
     if _ingress_user(request_headers, client_host):
         return True
-    return session_user(request_headers, settings) is not None
+    if session_user(request_headers, settings) is not None:
+        return True
+    return terminal_id(request_headers, registry) is not None
+
+
+def terminal_id(headers, registry: Registry | None) -> int | None:
+    """The paired kitchen terminal making this request, if it is one."""
+    if registry is None:
+        return None
+    return registry.identify(read_cookie(headers, TERMINAL_COOKIE))
 
 
 def _ingress_user(headers, client_host: str | None) -> dict[str, str] | None:
@@ -85,8 +98,15 @@ def current_user(request: Request) -> dict[str, str] | None:
 
 async def require_auth(request: Request) -> None:
     host = request.client.host if request.client else None
-    if not is_authorized(request.headers, host, request.query_params.get("token"), request.app.state.settings):
+    settings: Settings = request.app.state.settings
+    token = request.query_params.get("token")
+    if is_authorized(request.headers, host, token, settings):
+        return
+    # A kitchen terminal: only the stock and scanning endpoints.
+    if terminal_id(request.headers, request.app.state.terminals) is None:
         raise HTTPException(status_code=401, detail="Missing or invalid token")
+    if not terminals.allowed(request.method, request.url.path):
+        raise HTTPException(status_code=403, detail="A kitchen terminal can't do this")
 
 
 async def get_session(request: Request) -> AsyncIterator[AsyncSession]:
@@ -107,11 +127,14 @@ def get_files(request: Request) -> FileStore:
 
 
 def get_actor(request: Request) -> str | None:
-    """Who is acting: what the integration passes along, else the signed-in HA user."""
+    """Who is acting: what the integration passes along, else the signed-in HA user or the terminal."""
     if actor := request.headers.get("x-steward-actor"):
         return actor
     user = current_user(request)
-    return user["uid"] if user else None
+    if user:
+        return user["uid"]
+    terminal = terminal_id(request.headers, request.app.state.terminals)
+    return f"terminal:{terminal}" if terminal is not None else None
 
 
 Session = Annotated[AsyncSession, Depends(get_session)]

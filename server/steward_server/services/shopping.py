@@ -94,6 +94,14 @@ async def clear_done(session: AsyncSession, hub: EventHub, list_id: int) -> int:
     return len(done)
 
 
+async def is_on_list(session: AsyncSession, product_id: int) -> bool:
+    """Whether the product is on any shopping list and not ticked off yet."""
+    found = await session.scalar(
+        select(ShoppingItem.id).where(ShoppingItem.product_id == product_id, ShoppingItem.done.is_(False)).limit(1)
+    )
+    return found is not None
+
+
 async def ensure_on_list(session: AsyncSession, product: Product, amount: float) -> None:
     """Put a product on the default list unless it is already there (not done). Caller commits."""
     target = await default_list(session)

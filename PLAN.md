@@ -28,6 +28,7 @@ Runs locally (`docker compose -f dev/docker-compose.yml up -d`), plus an install
 - Recipes: website import (schema.org), "can I cook it" against stock, cook, missing items to the list.
 - Meal plan.
 - "Sign in with Home Assistant" for direct access; ingress identity in the app; Supervisor discovery.
+- Kitchen terminals (0.3.0): a paired kiosk page for a Raspberry Pi with a USB scanner, limited to stock and scanning; Pi setup script.
 
 **Integration**
 - To-do lists, sensors, calendars (chores, due dates, tasks, warranties, meal plan).
@@ -525,7 +526,7 @@ At household volume the cost doesn't matter; the real choice is privacy versus a
 | 5 · Receipts & money | IMAP intake, eBon parser with golden-file tests, matcher, review screen, receipt-first flow, price history, spending and waste insights and sensors, backfill | 90 %+ of lines match automatically after a month |
 | 6 · Kitchen | Recipes (import from URL or photo, "can I cook it", due score, consume, leftovers), meal plan with calendar and list generation, "use it up" | "What can I cook tonight?" is answered from real stock |
 | 7 · Equipment and the rest of Grocy | Equipment with manuals, manual Q&A, warranty and consumables; custom fields; custom lists; labels and printing; granular permissions; Grocy API subset if wanted | Everything Grocy does is covered, and Grocy can be switched off |
-| 8 · Extras | Forecasting, store reminders, list mirroring, kiosk mode, kitchen scale | |
+| 8 · Extras | Forecasting, store reminders, list mirroring, kiosk mode (done in 0.3.0), kitchen scale | |
 
 Phases 4 to 7 don't depend on each other: receipts and recipes need phase 1, and the wardrobe needs the AI layer from phase 3. If you want the wardrobe sooner, the AI layer simply moves up with it.
 
