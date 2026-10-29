@@ -10,6 +10,7 @@ import { describeSchedule, mdiIcon, parseDateTime, parseDay, relativeDue, relati
 import EmptyState from '@/components/EmptyState.vue'
 import StatusChip from '@/components/StatusChip.vue'
 import ChoreDialog from '@/components/ChoreDialog.vue'
+import TaskDialog from '@/components/TaskDialog.vue'
 import ConfirmDialog from '@/components/ConfirmDialog.vue'
 import type { Chore, Task } from '@/types'
 
@@ -19,6 +20,11 @@ const { data: chores, loading: choresLoading, error: choresError } = useResource
 const { data: tasks, loading: tasksLoading } = useResource<Task[]>(() => api.tasks(true), ['tasks'], [])
 
 const choreDialog = ref(false)
+const editing = ref<Chore | null>(null)
+function openChore(c: Chore | null) {
+  editing.value = c
+  choreDialog.value = true
+}
 const deleteChore = ref<Chore | null>(null)
 const confirmOpen = ref(false)
 
@@ -66,6 +72,12 @@ async function setDone(task: Task, done: boolean) {
   if (res && done)
     notify(t.tasks.doneMsg(task.name), { action: { label: t.common.undo, run: () => void attempt(() => api.updateTask(task.id, { done: false })) } })
 }
+const taskDialog = ref(false)
+const editingTask = ref<Task | null>(null)
+function openTask(task: Task) {
+  editingTask.value = task
+  taskDialog.value = true
+}
 async function removeTask(task: Task) {
   const ok = await attempt(async () => (await api.deleteTask(task.id), true))
   if (ok) notify(t.tasks.deleted)
@@ -85,12 +97,12 @@ function taskDueColor(task: Task) {
         <div class="d-flex align-center mb-4">
           <div class="page-title">{{ t.chores.title }}</div>
           <v-spacer />
-          <v-btn color="primary" variant="flat" prepend-icon="mdi-plus" @click="choreDialog = true">{{ smAndUp ? t.chores.newChore : t.common.create }}</v-btn>
+          <v-btn color="primary" variant="flat" prepend-icon="mdi-plus" @click="openChore(null)">{{ smAndUp ? t.chores.newChore : t.common.create }}</v-btn>
         </div>
         <v-alert v-if="choresError" type="error" variant="tonal" :text="choresError" class="mb-3" />
         <v-skeleton-loader v-if="choresLoading && !chores.length" type="list-item-two-line@4" class="rounded-xl" />
         <EmptyState v-else-if="!chores.length" icon="mdi-broom" :title="t.chores.empty" :text="t.chores.emptyHint">
-          <v-btn color="primary" variant="tonal" prepend-icon="mdi-plus" @click="choreDialog = true">{{ t.chores.newChore }}</v-btn>
+          <v-btn color="primary" variant="tonal" prepend-icon="mdi-plus" @click="openChore(null)">{{ t.chores.newChore }}</v-btn>
         </EmptyState>
         <v-card v-else variant="flat" border>
           <v-list lines="three" bg-color="transparent">
@@ -100,7 +112,7 @@ function taskDueColor(task: Task) {
                 <template #prepend>
                   <v-avatar :color="statusColor[c.status]" variant="tonal"><v-icon :icon="mdiIcon(c.icon)" /></v-avatar>
                 </template>
-                <v-list-item-title class="font-weight-medium wrap">{{ c.name }}</v-list-item-title>
+                <v-list-item-title class="font-weight-medium wrap clickable" @click="openChore(c)">{{ c.name }}</v-list-item-title>
                 <div class="text-body-2 mt-1" :class="c.status === 'overdue' ? 'text-error' : c.status === 'due_today' ? 'text-warning' : 'text-medium-emphasis'">
                   <v-icon icon="mdi-calendar" size="14" class="mr-1" />{{ dueText(c) }}
                 </div>
@@ -123,6 +135,7 @@ function taskDueColor(task: Task) {
                         <v-list-item prepend-icon="mdi-debug-step-over" :title="t.common.skip" :disabled="c.schedule === 'manual'" @click="execute(c, true)" />
                         <v-list-item v-for="p in state.people" :key="p.id" prepend-icon="mdi-account-check-outline" :title="`${t.common.done}: ${p.name}`" @click="execute(c, false, p.id)" />
                         <v-divider />
+                        <v-list-item prepend-icon="mdi-pencil-outline" :title="t.common.edit" @click="openChore(c)" />
                         <v-list-item prepend-icon="mdi-delete-outline" base-color="error" :title="t.common.delete" @click="deleteChore = c; confirmOpen = true" />
                       </v-list>
                     </v-menu>
@@ -160,14 +173,17 @@ function taskDueColor(task: Task) {
           <v-list v-else bg-color="transparent" lines="two">
             <v-list-item v-for="task in openTasks" :key="task.id">
               <template #prepend><v-checkbox-btn color="primary" :model-value="false" @update:model-value="setDone(task, true)" /></template>
-              <v-list-item-title class="wrap">{{ task.name }}</v-list-item-title>
+              <v-list-item-title class="wrap clickable" @click="openTask(task)">{{ task.name }}</v-list-item-title>
               <div class="d-flex flex-wrap ga-1 mt-1">
                 <v-chip v-if="task.due_date" :color="taskDueColor(task)" variant="tonal" prepend-icon="mdi-calendar" label>{{ relativeDue(parseDay(task.due_date)) }}</v-chip>
                 <v-chip variant="outlined" label>{{ task.category }}</v-chip>
                 <v-chip v-if="task.assignee" variant="outlined" prepend-icon="mdi-account-outline" label>{{ personName(task.assignee) }}</v-chip>
               </div>
               <div v-if="task.notes" class="text-caption text-medium-emphasis mt-1">{{ task.notes }}</div>
-              <template #append><v-btn icon="mdi-delete-outline" variant="text" size="small" :title="t.common.delete" @click="removeTask(task)" /></template>
+              <template #append>
+                <v-btn icon="mdi-pencil-outline" variant="text" size="small" :title="t.common.edit" @click="openTask(task)" />
+                <v-btn icon="mdi-delete-outline" variant="text" size="small" :title="t.common.delete" @click="removeTask(task)" />
+              </template>
             </v-list-item>
           </v-list>
           <template v-if="showDone && doneTasks.length">
@@ -184,7 +200,8 @@ function taskDueColor(task: Task) {
       </v-col>
     </v-row>
 
-    <ChoreDialog v-model="choreDialog" />
+    <ChoreDialog v-model="choreDialog" :chore="editing" />
+    <TaskDialog v-model="taskDialog" :task="editingTask" :categories="taskCategories" />
     <ConfirmDialog v-model="confirmOpen" :title="t.chores.deleteChore" :text="t.chores.confirmDelete(deleteChore?.name ?? '')" @confirm="removeChore" />
   </div>
 </template>

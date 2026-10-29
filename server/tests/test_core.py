@@ -10,7 +10,7 @@ import pytest
 from steward_server.db import Database
 from steward_server.events import EventHub
 from steward_server.models import Chore
-from steward_server.schemas import ChoreIn, PersonIn, ProductIn
+from steward_server.schemas import ChoreIn, ChorePatch, PersonIn, ProductIn
 from steward_server.services import Invalid, catalog, chores, people, receipts, shopping, stock
 from steward_server.textnorm import as_receipt_name, normalize_receipt_text
 
@@ -90,6 +90,42 @@ async def test_rotation_and_least_done(session, hub):
     least = await chores.create_chore(session, hub, ChoreIn(name="Saugen", assignment="least_done"))
     least = await chores.execute(session, hub, least.id, person_id="person.a")
     assert least.next_assignee == "person.b"
+
+
+async def test_chores_are_edited(session, hub):
+    await people.sync(session, hub, [PersonIn(id="person.a", name="A"), PersonIn(id="person.b", name="B")])
+    chore = await chores.create_chore(
+        session, hub, ChoreIn(name="Bad", schedule="weekly", weekdays=[0], first_due=datetime(2026, 11, 2, tzinfo=UTC))
+    )
+    due = chore.next_due
+
+    # Changing name, schedule and description keeps the due date.
+    chore = await chores.update_chore(
+        session, hub, chore.id, ChorePatch(name="Bathroom", interval=2, weekdays=[5], description="Sink too")
+    )
+    assert (chore.name, chore.interval, chore.weekdays, chore.description, chore.next_due) == ("Bathroom", 2, [5], "Sink too", due)
+    chore = await chores.update_chore(session, hub, chore.id, ChorePatch(description=None))
+    assert chore.description is None
+
+    moved = datetime(2026, 11, 7, tzinfo=UTC)
+    assert (await chores.update_chore(session, hub, chore.id, ChorePatch(next_due=moved))).next_due == moved
+    assert (await chores.update_chore(session, hub, chore.id, ChorePatch(schedule="manual"))).next_due is None
+    assert (await chores.update_chore(session, hub, chore.id, ChorePatch(schedule="daily"))).next_due is not None
+
+    # Assignment changes pick who is next; a rotation keeps them while they are still part of it.
+    chore = await chores.update_chore(session, hub, chore.id, ChorePatch(assignment="rotation", assignees=["person.b", "person.a"]))
+    assert chore.next_assignee == "person.b"
+    chore = await chores.update_chore(session, hub, chore.id, ChorePatch(assignees=["person.a", "person.b"]))
+    assert chore.next_assignee == "person.b"
+    chore = await chores.update_chore(session, hub, chore.id, ChorePatch(assignees=["person.a"]))
+    assert chore.next_assignee == "person.a"
+    chore = await chores.update_chore(session, hub, chore.id, ChorePatch(assignment="none"))
+    assert chore.next_assignee is None
+
+    with pytest.raises(Invalid):
+        await chores.update_chore(session, hub, chore.id, ChorePatch(schedule="hourly"))
+    with pytest.raises(Invalid):
+        await chores.update_chore(session, hub, chore.id, ChorePatch(name=" "))
 
 
 @pytest.mark.skipif(not SAMPLES.is_dir(), reason="sample eBons are not in the repository")

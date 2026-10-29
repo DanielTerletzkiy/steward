@@ -2,12 +2,13 @@
 import { computed, ref, watch } from 'vue'
 import { api } from '@/api'
 import { t } from '@/i18n'
-import { describeSchedule, todayIso } from '@/composables/format'
+import { describeSchedule, parseDateTime, toIsoDay, todayIso } from '@/composables/format'
 import { useCatalog } from '@/composables/catalog'
 import { attempt, notify } from '@/composables/notify'
-import type { Assignment, ChoreIn, Schedule } from '@/types'
+import type { Assignment, Chore, ChoreIn, Schedule } from '@/types'
 
 const open = defineModel<boolean>({ default: false })
+const props = defineProps<{ chore?: Chore | null }>()
 const { state } = useCatalog()
 
 const blank = () => ({
@@ -24,7 +25,26 @@ const blank = () => ({
 const form = ref(blank())
 const busy = ref(false)
 const requiredRule = [(v: string | null) => !!v?.trim() || t.common.required]
-watch(open, (v) => v && (form.value = blank()))
+// The day the chore was due when the dialog opened; the due date is only sent when it changed.
+let dueBefore = ''
+watch(open, (v) => {
+  if (!v) return
+  const c = props.chore
+  dueBefore = c?.next_due ? toIsoDay(parseDateTime(c.next_due)) : ''
+  form.value = c
+    ? {
+        name: c.name,
+        description: c.description ?? '',
+        icon: c.icon ?? '',
+        schedule: c.schedule,
+        interval: c.interval,
+        weekdays: [...c.weekdays],
+        assignment: c.assignment,
+        assignees: [...c.assignees],
+        firstDue: dueBefore || todayIso(),
+      }
+    : blank()
+})
 
 const schedules = (Object.keys(t.chores.schedules) as Schedule[]).map((value) => ({ value, title: t.chores.schedules[value] }))
 const assignments = (Object.keys(t.chores.assignments) as Assignment[]).map((value) => ({ value, title: t.chores.assignments[value] }))
@@ -43,13 +63,18 @@ async function save() {
     weekdays: f.schedule === 'weekly' ? [...f.weekdays].sort() : [],
     assignment: f.assignment,
     assignees: f.assignment === 'none' ? [] : f.assignees,
-    // Midnight local time of the chosen day.
-    first_due: f.schedule !== 'manual' && f.firstDue ? new Date(`${f.firstDue}T00:00:00`).toISOString() : null,
   }
-  const res = await attempt(() => api.createChore(body))
+  // Midnight local time of the chosen day.
+  const due = f.schedule !== 'manual' && f.firstDue ? new Date(`${f.firstDue}T00:00:00`).toISOString() : null
+  const chore = props.chore
+  const res = await attempt(() =>
+    chore
+      ? api.updateChore(chore.id, { ...body, ...(due && f.firstDue !== dueBefore ? { next_due: due } : {}) })
+      : api.createChore({ ...body, first_due: due }),
+  )
   busy.value = false
   if (res) {
-    notify(t.chores.created)
+    notify(chore ? t.chores.saved : t.chores.created)
     open.value = false
   }
 }
@@ -57,7 +82,7 @@ async function save() {
 
 <template>
   <v-dialog v-model="open" max-width="600" scrollable>
-    <v-card :title="t.chores.newChore" prepend-icon="mdi-broom">
+    <v-card :title="chore ? t.chores.editChore : t.chores.newChore" :prepend-icon="chore ? 'mdi-pencil' : 'mdi-broom'">
       <v-card-text>
         <v-form @submit.prevent="save">
           <v-text-field v-model="form.name" :label="t.common.name" autofocus :rules="requiredRule" />
@@ -68,7 +93,7 @@ async function save() {
             :label="t.chores.interval"
             type="number"
             min="1"
-            :prefix="form.schedule === 'dynamic' ? '' : 'alle'"
+            :prefix="form.schedule === 'dynamic' ? '' : t.chores.every"
             :suffix="t.chores.intervalSuffix[form.schedule]"
           />
           <div v-if="form.schedule === 'weekly'" class="mb-4">
@@ -77,7 +102,7 @@ async function save() {
               <v-chip v-for="(d, i) in t.chores.weekdayShort" :key="i" :value="i" variant="outlined" size="default">{{ d }}</v-chip>
             </v-chip-group>
           </div>
-          <v-text-field v-if="form.schedule !== 'manual'" v-model="form.firstDue" :label="t.chores.firstDue" type="date" />
+          <v-text-field v-if="form.schedule !== 'manual'" v-model="form.firstDue" :label="chore ? t.chores.nextDue : t.chores.firstDue" type="date" />
           <v-alert type="info" variant="tonal" density="compact" icon="mdi-calendar-sync" class="mb-4">{{ preview }}</v-alert>
           <v-select v-model="form.assignment" :label="t.chores.assignment" :items="assignments" />
           <v-select
@@ -102,7 +127,7 @@ async function save() {
       <v-card-actions>
         <v-spacer />
         <v-btn @click="open = false">{{ t.common.cancel }}</v-btn>
-        <v-btn color="primary" variant="flat" :loading="busy" @click="save">{{ t.common.create }}</v-btn>
+        <v-btn color="primary" variant="flat" :loading="busy" @click="save">{{ chore ? t.common.save : t.common.create }}</v-btn>
       </v-card-actions>
     </v-card>
   </v-dialog>

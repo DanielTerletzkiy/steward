@@ -16,6 +16,7 @@ const typeInfo: Record<string, { icon: string; color: string }> = {
   consume: { icon: 'mdi-silverware-fork-knife', color: 'secondary' },
   spoil: { icon: 'mdi-delete-variant', color: 'error' },
   open: { icon: 'mdi-package-variant-closed-remove', color: 'info' },
+  correct: { icon: 'mdi-pencil-outline', color: 'warning' },
 }
 
 async function undo(txn: StockTxn) {
@@ -39,7 +40,7 @@ async function undo(txn: StockTxn) {
             {{ t.journal.types[txn.type] ?? txn.type }}: {{ txn.product_name }}
           </v-list-item-title>
           <v-list-item-subtitle>
-            {{ formatAmount(txn.amount, productsById.get(txn.product_id)?.unit) }}<template v-if="txn.unit_price != null"> · {{ formatEuro(txn.unit_price) }}</template>
+            {{ txn.type === 'correct' && txn.amount > 0 ? '+' : '' }}{{ formatAmount(txn.amount, productsById.get(txn.product_id)?.unit) }}<template v-if="txn.unit_price != null"> · {{ formatEuro(txn.unit_price) }}</template>
             · {{ formatDateTime(txn.at) }} · {{ t.journal.sources[txn.source] ?? txn.source }}<template v-if="txn.actor"> · {{ txn.actor }}</template>
           </v-list-item-subtitle>
           <template #append>

@@ -26,6 +26,7 @@ export interface Product {
   due_days: number | null
   due_type: string
   image_url: string | null
+  barcodes?: { code: string; amount: number }[]
 }
 
 export interface ProductIn {
@@ -40,6 +41,20 @@ export interface ProductIn {
   image_url?: string | null
   barcodes?: string[]
   receipt_aliases?: string[]
+}
+
+/** A receipt text (normalized, as REWE prints it) that stands for a product. */
+export interface ReceiptAlias {
+  id: number
+  normalized: string
+  product_id: number
+  hits: number
+}
+
+export interface ProductAliases {
+  aliases: ReceiptAlias[]
+  /** Texts that belonged to another product until now. */
+  moved: { text: string; product_id: number; product_name: string }[]
 }
 
 export type StockStatus = 'ok' | 'due_soon' | 'expired' | 'out'
@@ -128,6 +143,8 @@ export interface ChoreIn {
   points?: number
   first_due?: string | null
 }
+
+export type ChorePatch = Partial<Omit<ChoreIn, 'first_due'>> & { next_due?: string | null }
 
 export interface Task {
   id: number

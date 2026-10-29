@@ -82,6 +82,11 @@ class ProductPatch(BaseModel):
     image_url: str | None = None
 
 
+class BarcodeOut(ORM):
+    code: str
+    amount: float
+
+
 class ProductOut(ORM):
     id: int
     name: str
@@ -93,6 +98,7 @@ class ProductOut(ORM):
     due_days: int | None
     due_type: str
     image_url: str | None
+    barcodes: list[BarcodeOut] = Field(default_factory=list)
 
 
 # --- stock ----------------------------------------------------------------
@@ -121,6 +127,12 @@ class StockItemOut(BaseModel):
 
 class EntryMoveIn(BaseModel):
     location_id: int | None
+
+
+class EntryPatch(BaseModel):
+    amount: float | None = Field(default=None, ge=0)
+    due_date: date | None = None
+    unit_price: float | None = Field(default=None, ge=0)
 
 
 class PurchaseIn(BaseModel):
@@ -204,6 +216,19 @@ class ChoreIn(BaseModel):
     consume_product_id: int | None = None
     consume_amount: float = 1
     first_due: UTCDatetime | None = None
+
+
+class ChorePatch(BaseModel):
+    name: str | None = None
+    description: str | None = None
+    icon: str | None = None
+    schedule: str | None = None
+    interval: int | None = None
+    weekdays: list[int] | None = None
+    assignment: str | None = None
+    assignees: list[str] | None = None
+    points: int | None = None
+    next_due: UTCDatetime | None = None
 
 
 class ChoreOut(BaseModel):
@@ -314,6 +339,28 @@ class LinePiecesIn(BaseModel):
 class LineMatchIn(BaseModel):
     product_id: int | None = None
     new_product: ProductIn | None = None
+
+
+class ReceiptAliasOut(ORM):
+    id: int
+    normalized: str
+    product_id: int
+    hits: int
+
+
+class ProductAliasesIn(BaseModel):
+    texts: list[str]
+
+
+class AliasMovedOut(BaseModel):
+    text: str
+    product_id: int
+    product_name: str
+
+
+class ProductAliasesOut(BaseModel):
+    aliases: list[ReceiptAliasOut]
+    moved: list[AliasMovedOut]  # texts that belonged to another product until now
 
 
 # --- files ----------------------------------------------------------------

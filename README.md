@@ -80,6 +80,8 @@ The integration authenticates with `STEWARD_API_TOKEN` (`dev-token` in the demo)
 
   Correct it on the line.
 - **Bottle deposit:** the deposit card shows the money balance and how many bottles and cans are still to take back (bought with deposit minus returned).
+- **Receipt texts:** Steward learns which receipt text means which product when you assign a line. In Edit product, the texts show as chips: add, remove or move them from another product. Open receipts are matched again right away.
+- **Corrections:** a batch's amount, date and price can be edited from its row in Stock. A changed amount shows up in the history as "Corrected" and can be undone. Barcodes can be removed in Edit product, and receipts can be deleted; what they put into stock stays.
 - **eBons from email:** Settings → Receipts from email. Steward checks a mailbox over IMAP every 15 minutes (configurable) for mails from REWE with a PDF and imports them.
   - Gmail needs an app password.
   - The mailbox is opened read-only, unless imported mails should be marked as read.

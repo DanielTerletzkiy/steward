@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { computed, ref, watch } from 'vue'
+import { useRouter } from 'vue-router'
 import { useDisplay } from 'vuetify'
 import { api } from '@/api'
 import { t } from '@/i18n'
@@ -8,6 +9,7 @@ import { useCatalog } from '@/composables/catalog'
 import { attempt, notify } from '@/composables/notify'
 import { formatDateTime, formatEuro, formatNumber } from '@/composables/format'
 import LineMatchDialog from '@/components/LineMatchDialog.vue'
+import ConfirmDialog from '@/components/ConfirmDialog.vue'
 import type { Receipt, ReceiptLine } from '@/types'
 
 const props = defineProps<{ id: number }>()
@@ -16,7 +18,9 @@ const { productsById } = useCatalog()
 
 const receipt = ref<Receipt | null>(null)
 const error = ref<string | null>(null)
+let deleted = false
 async function load() {
+  if (deleted) return
   try {
     receipt.value = await api.receipt(props.id)
     error.value = null
@@ -26,6 +30,18 @@ async function load() {
 }
 watch(() => props.id, load, { immediate: true })
 onTopics(['receipts', 'catalog'], load)
+
+const router = useRouter()
+const confirmDelete = ref(false)
+async function remove() {
+  const r = receipt.value
+  if (!r) return
+  deleted = true
+  if (await attempt(async () => (await api.deleteReceipt(r.id), true))) {
+    notify(t.receipts.deleted)
+    router.replace('/receipts')
+  } else deleted = false
+}
 
 const lineSum = computed(() => Math.round((receipt.value?.lines.reduce((s, l) => s + l.total, 0) ?? 0) * 100) / 100)
 const diff = computed(() => (receipt.value ? Math.round((receipt.value.total - lineSum.value) * 100) / 100 : 0))
@@ -85,7 +101,11 @@ async function toStock() {
 
 <template>
   <div class="page" style="max-width: 900px">
-    <v-btn variant="text" prepend-icon="mdi-arrow-left" to="/receipts" class="mb-2 ml-n3">{{ t.receipts.title }}</v-btn>
+    <div class="d-flex align-center mb-2">
+      <v-btn variant="text" prepend-icon="mdi-arrow-left" to="/receipts" class="ml-n3">{{ t.receipts.title }}</v-btn>
+      <v-spacer />
+      <v-btn v-if="receipt" variant="text" color="error" prepend-icon="mdi-delete-outline" @click="confirmDelete = true">{{ t.common.delete }}</v-btn>
+    </div>
     <v-alert v-if="error" type="error" variant="tonal" :text="error" />
     <v-skeleton-loader v-else-if="!receipt" type="article, list-item@6" class="rounded-xl" />
 
@@ -210,5 +230,11 @@ async function toStock() {
         </v-card>
       </v-dialog>
     </template>
+    <ConfirmDialog
+      v-model="confirmDelete"
+      :title="t.receipts.deleteTitle"
+      :text="receipt?.stocked ? t.receipts.deleteStocked : t.receipts.deleteText"
+      @confirm="remove"
+    />
   </div>
 </template>

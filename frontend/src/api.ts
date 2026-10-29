@@ -1,8 +1,8 @@
 // All URLs are relative ("api/...") so the app works under any ingress path prefix.
 import { requireLogin } from './composables/auth'
 import type {
-  AiProviderIn, AiSettings, Chore, ChoreIn, Equipment, EquipmentDocument, EquipmentIn, Forecast, Garment, GarmentAnalysis,
-  GarmentIn, GarmentState, Location, ManualHit, Me, Outfit, OutfitIn, Person, Product, ProductIn, Receipt, ReceiptLine,
+  AiProviderIn, AiSettings, Chore, ChoreIn, ChorePatch, Equipment, EquipmentDocument, EquipmentIn, Forecast, Garment, GarmentAnalysis,
+  GarmentIn, GarmentState, Location, ManualHit, Me, Outfit, OutfitIn, Person, Product, ProductAliases, ProductIn, Receipt, ReceiptAlias, ReceiptLine,
   ReceiptSummary, RecognizedItem, EquipmentRun, HaDevice, HaEntity, ScanLookup, ScanMode, ScanResult, ShoppingItem, ShoppingList, StockItem, StockTxn,
   StyleProfile, Summary, Task, TaskIn, WardrobeVocabulary, WeatherSettings,
   Fulfillment, MealPlanEntry, MealPlanIn, Recipe, RecipeIn, RecipeSuggestion, StockEntry, EmailImportIn, EmailImportRun, EmailImportSettings,
@@ -76,8 +76,12 @@ export const api = {
   createProduct: (body: ProductIn) => post<Product>('products', body),
   updateProduct: (id: number, body: Partial<ProductIn>) => patch<Product>(`products/${id}`, body),
   deleteProduct: (id: number) => del(`products/${id}`),
+  receiptAliases: () => get<ReceiptAlias[]>('receipt-aliases'),
+  setProductAliases: (id: number, texts: string[]) => put<ProductAliases>(`products/${id}/aliases`, { texts }),
 
   stock: (includeEmpty = true) => get<StockItem[]>(`stock?include_empty=${includeEmpty}`),
+  editEntry: (entryId: number, body: { amount?: number; due_date?: string | null; unit_price?: number | null }) =>
+    patch<StockEntry>(`stock/entries/${entryId}`, body),
   moveEntry: (entryId: number, location_id: number | null) => put<StockEntry>(`stock/entries/${entryId}/location`, { location_id }),
   journal: (limit = 100) => get<StockTxn[]>(`stock/journal?limit=${limit}`),
   purchase: (body: { product_id: number; amount: number; due_date?: string | null; location_id?: number | null; unit_price?: number | null }) =>
@@ -93,12 +97,13 @@ export const api = {
     post<ShoppingItem>(`shopping-lists/${listId}/items`, body),
   addMissing: (listId: number) => post<{ added: number }>(`shopping-lists/${listId}/add-missing`),
   clearDone: (listId: number) => post<{ removed: number }>(`shopping-lists/${listId}/clear-done`),
-  updateShoppingItem: (id: number, body: Partial<Pick<ShoppingItem, 'text' | 'amount' | 'note' | 'done'>>) =>
+  updateShoppingItem: (id: number, body: Partial<Pick<ShoppingItem, 'text' | 'amount' | 'done'>> & { note?: string | null }) =>
     patch<ShoppingItem>(`shopping-items/${id}`, body),
   deleteShoppingItem: (id: number) => del(`shopping-items/${id}`),
 
   chores: () => get<Chore[]>('chores'),
   createChore: (body: ChoreIn) => post<Chore>('chores', body),
+  updateChore: (id: number, body: ChorePatch) => patch<Chore>(`chores/${id}`, body),
   deleteChore: (id: number) => del(`chores/${id}`),
   executeChore: (id: number, opts: { person_id?: string | null; skipped?: boolean } = {}) =>
     post<Chore>(`chores/${id}/execute`, opts),
@@ -119,6 +124,7 @@ export const api = {
     put<ReceiptLine>(`receipts/${receiptId}/lines/${lineId}`, body),
   setLinePieces: (receiptId: number, lineId: number, pieces: number) =>
     put<ReceiptLine>(`receipts/${receiptId}/lines/${lineId}/pieces`, { pieces }),
+  deleteReceipt: (id: number) => del(`receipts/${id}`),
   stockReceipt: (id: number) => post<{ stocked: number }>(`receipts/${id}/stock`),
 
   equipmentList: () => get<Equipment[]>('equipment'),
@@ -185,6 +191,7 @@ export const api = {
     return post<{ items: RecognizedItem[] }>('scan/photo', form)
   },
   addBarcode: (productId: number, code: string, amount = 1) => post<Product>(`products/${productId}/barcodes`, { code, amount }),
+  removeBarcode: (productId: number, code: string) => request<Product>('DELETE', `products/${productId}/barcodes/${encodeURIComponent(code)}`),
 
   recipes: () => get<Recipe[]>('recipes'),
   recipe: (id: number) => get<Recipe>(`recipes/${id}`),

@@ -18,8 +18,10 @@ from .schemas import (
     ChoreExecuteIn,
     ChoreIn,
     ChoreOut,
+    ChorePatch,
     ConsumeIn,
     EntryMoveIn,
+    EntryPatch,
     LineMatchIn,
     LinePiecesIn,
     LocationIn,
@@ -28,10 +30,13 @@ from .schemas import (
     OpenIn,
     PersonIn,
     PersonOut,
+    ProductAliasesIn,
+    ProductAliasesOut,
     ProductIn,
     ProductOut,
     ProductPatch,
     PurchaseIn,
+    ReceiptAliasOut,
     ReceiptLineOut,
     ReceiptOut,
     ReceiptSummaryOut,
@@ -183,7 +188,10 @@ async def list_products(session: Session):
 
 @router.post("/products", response_model=ProductOut)
 async def create_product(session: Session, hub: Hub, body: ProductIn):
-    return await catalog.create_product(session, hub, body)
+    product = await catalog.create_product(session, hub, body.model_copy(update={"receipt_aliases": []}))
+    if body.receipt_aliases:
+        await receipts.set_product_aliases(session, hub, product.id, body.receipt_aliases)
+    return product
 
 
 @router.patch("/products/{product_id}", response_model=ProductOut)
@@ -194,6 +202,16 @@ async def update_product(session: Session, hub: Hub, product_id: int, body: Prod
 @router.delete("/products/{product_id}", status_code=204)
 async def delete_product(session: Session, hub: Hub, product_id: int) -> None:
     await catalog.delete_product(session, hub, product_id)
+
+
+@router.put("/products/{product_id}/aliases", response_model=ProductAliasesOut)
+async def set_product_aliases(session: Session, hub: Hub, product_id: int, body: ProductAliasesIn):
+    return await receipts.set_product_aliases(session, hub, product_id, body.texts)
+
+
+@router.get("/receipt-aliases", response_model=list[ReceiptAliasOut])
+async def list_receipt_aliases(session: Session):
+    return await receipts.list_aliases(session)
 
 
 # --- stock ----------------------------------------------------------------
@@ -237,6 +255,11 @@ async def post_open(session: Session, hub: Hub, actor: Actor, body: OpenIn) -> d
     before = await stock.last_txn_id(session)
     await stock.open_product(session, hub, body.product_id, body.amount, actor=actor)
     return {"txn_ids": await stock.txn_ids_after(session, before)}
+
+
+@router.patch("/stock/entries/{entry_id}", response_model=StockEntryOut)
+async def edit_entry(session: Session, hub: Hub, actor: Actor, entry_id: int, body: EntryPatch):
+    return await stock.edit_entry(session, hub, entry_id, body, actor)
 
 
 @router.put("/stock/entries/{entry_id}/location", response_model=StockEntryOut)
@@ -298,6 +321,11 @@ async def list_chores(session: Session):
 @router.post("/chores", response_model=ChoreOut)
 async def create_chore(session: Session, hub: Hub, body: ChoreIn):
     return await chores.create_chore(session, hub, body)
+
+
+@router.patch("/chores/{chore_id}", response_model=ChoreOut)
+async def update_chore(session: Session, hub: Hub, chore_id: int, body: ChorePatch):
+    return await chores.update_chore(session, hub, chore_id, body)
 
 
 @router.delete("/chores/{chore_id}", status_code=204)
@@ -368,6 +396,11 @@ async def match_line(session: Session, hub: Hub, receipt_id: int, line_id: int, 
 @router.put("/receipts/{receipt_id}/lines/{line_id}/pieces", response_model=ReceiptLineOut)
 async def set_line_pieces(session: Session, hub: Hub, receipt_id: int, line_id: int, body: LinePiecesIn):
     return await receipts.set_line_pieces(session, hub, receipt_id, line_id, body.pieces)
+
+
+@router.delete("/receipts/{receipt_id}", status_code=204)
+async def delete_receipt(session: Session, hub: Hub, receipt_id: int) -> None:
+    await receipts.delete_receipt(session, hub, receipt_id)
 
 
 @router.post("/receipts/{receipt_id}/stock")

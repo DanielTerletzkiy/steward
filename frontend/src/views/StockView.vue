@@ -12,7 +12,8 @@ import EmptyState from '@/components/EmptyState.vue'
 import StatusChip from '@/components/StatusChip.vue'
 import PurchaseDialog from '@/components/PurchaseDialog.vue'
 import ProductDialog from '@/components/ProductDialog.vue'
-import type { Product, StockItem } from '@/types'
+import EntryDialog from '@/components/EntryDialog.vue'
+import type { Product, StockEntry, StockItem } from '@/types'
 
 const { data: items, loading, error, reload } = useResource<StockItem[]>(() => api.stock(true), ['stock', 'catalog'], [])
 const { state, locationsById } = useCatalog()
@@ -127,6 +128,12 @@ function openEdit(p: Product | null) {
   editOpen.value = true
 }
 const expanded = ref<number | null>(null)
+const entryEdit = ref<{ entry: StockEntry; product: Product } | null>(null)
+const entryOpen = ref(false)
+function openEntry(entry: StockEntry, product: Product) {
+  entryEdit.value = { entry, product }
+  entryOpen.value = true
+}
 </script>
 
 <template>
@@ -247,6 +254,7 @@ const expanded = ref<number | null>(null)
                         </td>
                         <td>{{ e.unit_price != null ? formatEuro(e.unit_price) : '' }}</td>
                         <td><v-icon v-if="e.opened_at" icon="mdi-package-variant-closed-remove" size="16" :title="t.status.opened" /></td>
+                        <td class="text-right" style="width: 1%"><v-btn icon="mdi-pencil-outline" variant="text" size="x-small" :title="t.stock.editEntry" @click="openEntry(e, i.product)" /></td>
                       </tr>
                     </tbody>
                   </v-table>
@@ -260,6 +268,7 @@ const expanded = ref<number | null>(null)
 
     <PurchaseDialog v-model="purchaseOpen" :product="purchaseFor" />
     <ProductDialog v-model="editOpen" :product="editFor" />
+    <EntryDialog v-model="entryOpen" :entry="entryEdit?.entry ?? null" :product="entryEdit?.product ?? null" />
     <v-btn class="scan-fab" color="primary" size="large" rounded="lg" elevation="4" prepend-icon="mdi-barcode-scan" to="/scan" height="56">{{ t.nav.scan }}</v-btn>
   </div>
 </template>

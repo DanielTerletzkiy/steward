@@ -5,16 +5,16 @@ import { t } from '@/i18n'
 import { useCatalog } from '@/composables/catalog'
 import { attempt, notify } from '@/composables/notify'
 import ConfirmDialog from './ConfirmDialog.vue'
-import type { Product, ProductIn } from '@/types'
+import type { Product, ProductIn, ReceiptAlias } from '@/types'
 import LocationSelect from './LocationSelect.vue'
 
 const open = defineModel<boolean>({ default: false })
 const props = defineProps<{ product?: Product | null; initialName?: string }>()
 const emit = defineEmits<{ saved: [Product] }>()
-const { categories, units } = useCatalog()
+const { categories, units, productsById } = useCatalog()
 
-const empty = (): ProductIn & { aliases: string } => ({
-  name: '', brand: null, category: null, location_id: null, unit: 'Stk', min_stock: 0, due_days: null, due_type: 'best_before', aliases: '',
+const empty = (): ProductIn & { aliases: string[] } => ({
+  name: '', brand: null, category: null, location_id: null, unit: 'Stk', min_stock: 0, due_days: null, due_type: 'best_before', aliases: [],
 })
 const form = ref(empty())
 const busy = ref(false)
@@ -22,13 +22,48 @@ const requiredRule = [(v: string | null) => !!v?.trim() || t.common.required]
 const confirmDelete = ref(false)
 const isEdit = computed(() => !!props.product)
 
-watch(open, (v) => {
+// Receipt texts of all products: this product's are edited here, the others show when a text is taken.
+const knownAliases = ref<ReceiptAlias[]>([])
+const aliasesByText = computed(() => new Map(knownAliases.value.map((a) => [a.normalized, a])))
+const ownAliases = () => knownAliases.value.filter((a) => a.product_id === props.product?.id).map((a) => a.normalized)
+
+watch(open, async (v) => {
   if (!v) return
   const p = props.product
   form.value = p
-    ? { name: p.name, brand: p.brand, category: p.category, location_id: p.location_id, unit: p.unit, min_stock: p.min_stock, due_days: p.due_days, due_type: p.due_type, aliases: '' }
+    ? { name: p.name, brand: p.brand, category: p.category, location_id: p.location_id, unit: p.unit, min_stock: p.min_stock, due_days: p.due_days, due_type: p.due_type, aliases: [] }
     : { ...empty(), name: props.initialName ?? '' }
+  knownAliases.value = await api.receiptAliases().catch(() => [])
+  if (p && open.value) form.value.aliases = ownAliases()
 })
+
+// The same normalization the server applies (REWE prints upper case without umlauts).
+const TRANSLITERATION: Record<string, string> = { Ä: 'AE', Ö: 'OE', Ü: 'UE', ẞ: 'SS' }
+const normalize = (text: string) => text.toUpperCase().replace(/[ÄÖÜẞ]/g, (c) => TRANSLITERATION[c]).replace(/\s+/g, ' ').trim()
+
+function setAliases(values: string[]) {
+  form.value.aliases = [...new Set(values.map(normalize).filter(Boolean))]
+}
+
+// Barcodes are linked by scanning; here they can be seen and removed (e.g. one linked to the wrong product).
+const barcodes = ref<{ code: string; amount: number }[]>([])
+watch(open, (v) => v && (barcodes.value = [...(props.product?.barcodes ?? [])]))
+async function removeBarcode(code: string) {
+  const product = props.product
+  if (!product) return
+  const res = await attempt(() => api.removeBarcode(product.id, code))
+  if (!res) return
+  barcodes.value = res.barcodes ?? []
+  notify(t.stock.barcodeRemoved(code))
+}
+
+const takenAliases = computed(() =>
+  form.value.aliases.flatMap((text) => {
+    const owner = aliasesByText.value.get(text)?.product_id
+    if (owner === undefined || owner === props.product?.id) return []
+    return [{ text, product: productsById.value.get(owner)?.name ?? '?' }]
+  }),
+)
 
 const dueTypes = [
   { title: t.stock.bestBefore, value: 'best_before' },
@@ -49,10 +84,14 @@ async function save() {
     due_days: f.due_days === null || (f.due_days as unknown) === '' ? null : Number(f.due_days),
     due_type: f.due_type,
   }
-  const result = await attempt(() => {
-    if (props.product) return api.updateProduct(props.product.id, body)
-    const aliases = f.aliases.split(',').map((s) => s.trim()).filter(Boolean)
-    return api.createProduct({ ...body, receipt_aliases: aliases })
+  const result = await attempt(async () => {
+    if (!props.product) return api.createProduct({ ...body, receipt_aliases: f.aliases })
+    const saved = await api.updateProduct(props.product.id, body)
+    const before = ownAliases()
+    if (before.length !== f.aliases.length || before.some((a) => !f.aliases.includes(a))) {
+      await api.setProductAliases(props.product.id, f.aliases)
+    }
+    return saved
   })
   busy.value = false
   if (result) {
@@ -91,8 +130,41 @@ async function remove() {
             <v-col cols="6"><v-text-field v-model.number="form.min_stock" :label="t.stock.minStock" type="number" min="0" step="any" /></v-col>
             <v-col cols="6"><v-text-field v-model.number="form.due_days" :label="t.stock.dueDays" type="number" min="0" clearable /></v-col>
             <v-col cols="12"><v-select v-model="form.due_type" :label="t.stock.dueType" :items="dueTypes" /></v-col>
-            <v-col v-if="!isEdit" cols="12">
-              <v-text-field v-model="form.aliases" :label="t.stock.aliases" :hint="t.stock.aliasesHint" persistent-hint />
+            <v-col cols="12">
+              <v-combobox
+                :model-value="form.aliases"
+                :label="t.stock.aliases"
+                :hint="t.stock.aliasesHint"
+                persistent-hint
+                multiple
+                chips
+                closable-chips
+                :delimiters="[',']"
+                prepend-inner-icon="mdi-receipt-text-outline"
+                @update:model-value="setAliases"
+              >
+                <template #chip="{ props: chip, item }">
+                  <v-chip
+                    v-bind="chip"
+                    size="small"
+                    :color="takenAliases.some((a) => a.text === item.value) ? 'warning' : undefined"
+                    :title="aliasesByText.get(item.value)?.hits ? t.stock.aliasHits(aliasesByText.get(item.value)!.hits) : undefined"
+                  >
+                    {{ item.title }}
+                    <span v-if="aliasesByText.get(item.value)?.hits" class="ml-1 opacity-60">{{ aliasesByText.get(item.value)!.hits }}×</span>
+                  </v-chip>
+                </template>
+              </v-combobox>
+              <v-alert v-for="a in takenAliases" :key="a.text" type="warning" variant="tonal" density="compact" class="mt-2" :text="t.stock.aliasTaken(a.text, a.product)" />
+            </v-col>
+            <v-col v-if="isEdit" cols="12">
+              <div class="text-caption text-medium-emphasis mb-1">{{ t.stock.barcodes }}</div>
+              <div v-if="barcodes.length" class="d-flex flex-wrap ga-1">
+                <v-chip v-for="b in barcodes" :key="b.code" size="small" prepend-icon="mdi-barcode" closable class="text-tabular" @click:close="removeBarcode(b.code)">
+                  {{ b.code }}<span v-if="b.amount !== 1" class="ml-1 opacity-60">× {{ b.amount }}</span>
+                </v-chip>
+              </div>
+              <div v-else class="text-body-2 text-medium-emphasis">{{ t.stock.barcodesHint }}</div>
             </v-col>
           </v-row>
           <button type="submit" hidden />

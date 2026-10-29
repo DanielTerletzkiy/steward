@@ -18,7 +18,7 @@ from ..ha_bridge import HABridge
 from ..models import Barcode, BarcodeLookup, Product
 from ..schemas import ShoppingItemIn
 from ..timeutil import as_utc, today, utcnow
-from . import Invalid, ai, catalog, shopping, stock
+from . import Invalid, NotFound, ai, catalog, shopping, stock
 
 LOG = logging.getLogger("steward.scan")
 
@@ -211,7 +211,20 @@ async def add_barcode(session: AsyncSession, hub: EventHub, product_id: int, cod
     else:
         existing.product_id, existing.amount = product.id, amount
     await session.commit()
-    await session.refresh(product)
+    await session.refresh(product, ["barcodes"])
+    hub.publish("catalog")
+    return product
+
+
+async def remove_barcode(session: AsyncSession, hub: EventHub, product_id: int, code: str) -> Product:
+    """Forget a code, e.g. one that was linked to the wrong product."""
+    product = await catalog.get_product(session, product_id)
+    barcode = await session.get(Barcode, code)
+    if barcode is None or barcode.product_id != product.id:
+        raise NotFound(f"Barcode {code} is not linked to {product.name}")
+    await session.delete(barcode)
+    await session.commit()
+    await session.refresh(product, ["barcodes"])
     hub.publish("catalog")
     return product
 

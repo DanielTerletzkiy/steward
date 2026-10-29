@@ -10,7 +10,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..events import EventHub
 from ..models import Chore, ChoreLog, Person
-from ..schemas import ChoreIn, ChoreOut
+from ..schemas import ChoreIn, ChoreOut, ChorePatch
 from ..timeutil import LOCAL_TZ, as_utc, today, utcnow
 from . import Invalid, NotFound
 from .stock import consume
@@ -124,11 +124,15 @@ async def list_chores(session: AsyncSession) -> list[ChoreOut]:
     return sorted(result, key=lambda c: (c.next_due or far_future, c.name))
 
 
-async def create_chore(session: AsyncSession, hub: EventHub, data: ChoreIn) -> ChoreOut:
-    if data.schedule not in SCHEDULES:
+def _check(schedule: str, assignment: str) -> None:
+    if schedule not in SCHEDULES:
         raise Invalid(f"schedule must be one of {SCHEDULES}")
-    if data.assignment not in ASSIGNMENTS:
+    if assignment not in ASSIGNMENTS:
         raise Invalid(f"assignment must be one of {ASSIGNMENTS}")
+
+
+async def create_chore(session: AsyncSession, hub: EventHub, data: ChoreIn) -> ChoreOut:
+    _check(data.schedule, data.assignment)
     chore = Chore(**data.model_dump(exclude={"first_due"}))
     if data.first_due is not None:
         chore.next_due = data.first_due
@@ -137,6 +141,37 @@ async def create_chore(session: AsyncSession, hub: EventHub, data: ChoreIn) -> C
     session.add(chore)
     await session.flush()
     chore.next_assignee = await _pick_assignee(session, chore, None)
+    await session.commit()
+    hub.publish("chores")
+    return await to_out(session, chore)
+
+
+async def update_chore(session: AsyncSession, hub: EventHub, chore_id: int, patch: ChorePatch) -> ChoreOut:
+    chore = await session.get(Chore, chore_id)
+    if chore is None:
+        raise NotFound(f"Chore {chore_id} not found")
+    changes = patch.model_dump(exclude_unset=True)
+    if changes.get("name") is not None and not changes["name"].strip():
+        raise Invalid("Name must not be empty")
+    _check(changes.get("schedule") or chore.schedule, changes.get("assignment") or chore.assignment)
+    was_manual = chore.schedule == "manual"
+    who = (chore.assignment, list(chore.assignees))
+    for key, value in changes.items():
+        if value is not None or key in ("description", "icon"):
+            setattr(chore, key, value)
+    chore.interval = max(chore.interval, 1)
+    # The due date stays unless it is given; a chore that turns manual has none, one that stops being manual is due today.
+    if chore.schedule == "manual":
+        chore.next_due = None
+    elif patch.next_due is None and (was_manual or chore.next_due is None):
+        chore.next_due = _local_midnight(today())
+    if (chore.assignment, chore.assignees) != who:
+        # Rotation keeps whoever is next if they are still part of it; everything else is picked afresh.
+        keeps = chore.assignment == "rotation" and chore.next_assignee and (
+            not chore.assignees or chore.next_assignee in chore.assignees
+        )
+        if not keeps:
+            chore.next_assignee = await _pick_assignee(session, chore, None)
     await session.commit()
     hub.publish("chores")
     return await to_out(session, chore)

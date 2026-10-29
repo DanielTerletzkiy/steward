@@ -62,7 +62,14 @@ async def update_item(session: AsyncSession, hub: EventHub, item_id: int, patch:
     item = await session.get(ShoppingItem, item_id)
     if item is None:
         raise NotFound(f"Item {item_id} not found")
-    for key, value in patch.model_dump(exclude_unset=True).items():
+    values = patch.model_dump(exclude_unset=True)
+    if "text" in values and not (values["text"] or "").strip():
+        raise Invalid("Text must not be empty")
+    if "amount" in values and not (values["amount"] or 0) > 0:
+        raise Invalid("Amount must be more than 0")
+    if values.get("done") is None:
+        values.pop("done", None)
+    for key, value in values.items():
         setattr(item, key, value)
     await session.commit()
     hub.publish("shopping", list_id=item.list_id)

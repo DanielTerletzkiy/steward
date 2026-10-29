@@ -9,6 +9,7 @@ import { onTopics } from '@/composables/live'
 import { attempt, notify } from '@/composables/notify'
 import { formatAmount } from '@/composables/format'
 import EmptyState from '@/components/EmptyState.vue'
+import ShoppingItemDialog from '@/components/ShoppingItemDialog.vue'
 import type { ShoppingItem, ShoppingList } from '@/types'
 
 const { smAndUp } = useDisplay()
@@ -89,6 +90,17 @@ async function clearDone() {
   if (res) notify(t.shopping.removed(res.removed))
 }
 
+const editing = ref<ShoppingItem | null>(null)
+const editOpen = ref(false)
+function openEdit(item: ShoppingItem) {
+  editing.value = item
+  editOpen.value = true
+}
+function edited(saved: ShoppingItem) {
+  items.value = items.value.map((i) => (i.id === saved.id ? saved : i))
+}
+const unitOf = (i: ShoppingItem | null) => (i?.product_id != null ? productsById.value.get(i.product_id)?.unit : null)
+
 function amountLabel(i: ShoppingItem) {
   const unit = i.product_id != null ? productsById.value.get(i.product_id)?.unit : undefined
   if (i.amount === 1 && !unit) return ''
@@ -153,6 +165,7 @@ function amountLabel(i: ShoppingItem) {
             <v-list-item-subtitle v-if="i.note">{{ i.note }}</v-list-item-subtitle>
             <template #append>
               <span v-if="amountLabel(i)" class="text-body-2 text-medium-emphasis text-tabular mr-2">{{ amountLabel(i) }}</span>
+              <v-btn icon="mdi-pencil-outline" variant="text" size="small" :title="t.common.edit" @click.stop="openEdit(i)" />
               <v-btn icon="mdi-close" variant="text" size="small" :title="t.common.delete" @click.stop="remove(i)" />
             </template>
           </v-list-item>
@@ -179,5 +192,6 @@ function amountLabel(i: ShoppingItem) {
         </v-expand-transition>
       </div>
     </template>
+    <ShoppingItemDialog v-model="editOpen" :item="editing" :unit="unitOf(editing)" @saved="edited" />
   </div>
 </template>

@@ -9,7 +9,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..events import EventHub
 from ..models import Location, Product, StockEntry, StockTxn
-from ..schemas import ProductOut, StockEntryOut, StockItemOut, StockTxnOut
+from ..schemas import EntryPatch, ProductOut, StockEntryOut, StockItemOut, StockTxnOut
 from ..timeutil import LOCAL_TZ, today, utcnow
 from . import Invalid, NotFound
 from .catalog import get_product
@@ -215,6 +215,10 @@ async def undo(session: AsyncSession, hub: EventHub, txn_id: int) -> None:
         if entry is None:
             raise Invalid("The stock entry no longer exists")
         entry.amount = round(entry.amount + txn.amount, 6)
+    elif txn.type == "correct":
+        if entry is None or entry.amount + _EPSILON < txn.amount:
+            raise Invalid("The corrected stock entry has changed since")
+        entry.amount = round(entry.amount - txn.amount, 6)
     elif txn.type == "open":
         if entry is None or entry.opened_at is None:
             raise Invalid("The opened stock entry no longer exists")
@@ -286,6 +290,35 @@ async def move_entry(session: AsyncSession, hub: EventHub, entry_id: int, locati
     entry.location_id = location_id
     await session.commit()
     hub.publish("stock")
+    return entry
+
+
+async def edit_entry(
+    session: AsyncSession, hub: EventHub, entry_id: int, patch: EntryPatch, actor: str | None = None
+) -> StockEntry:
+    """Correct one lot: its date and price as they are, a changed amount as a "correct" transaction
+    (the difference), so the journal shows it and it can be undone."""
+    entry = await session.get(StockEntry, entry_id)
+    if entry is None:
+        raise NotFound(f"Stock entry {entry_id} not found")
+    values = patch.model_dump(exclude_unset=True)
+    if "due_date" in values:
+        entry.due_date = values["due_date"]
+    if "unit_price" in values:
+        entry.unit_price = values["unit_price"]
+    amount = values.get("amount")
+    if amount is not None and abs(amount - entry.amount) > _EPSILON:
+        delta = round(amount - entry.amount, 6)
+        entry.amount = round(amount, 6)
+        session.add(
+            StockTxn(type="correct", product_id=entry.product_id, entry_id=entry.id, amount=delta, unit_price=entry.unit_price, actor=actor)
+        )
+        if delta < 0:
+            product = await session.get(Product, entry.product_id)
+            if product is not None:
+                await _auto_add_to_shopping_list(session, product)
+    await session.commit()
+    hub.publish("stock", product_id=entry.product_id)
     return entry
 
 

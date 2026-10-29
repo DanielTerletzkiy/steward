@@ -13,7 +13,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from ..events import EventHub
 from ..deposit import pieces_from_name
 from ..models import Product, Receipt, ReceiptAlias, ReceiptLine, ReceiptPack
-from ..schemas import LineMatchIn, ReceiptSummaryOut
+from ..schemas import AliasMovedOut, LineMatchIn, ProductAliasesOut, ReceiptAliasOut, ReceiptSummaryOut
 from ..textnorm import as_receipt_name, normalize_receipt_text
 from ..timeutil import LOCAL_TZ, as_utc, today
 from . import Invalid, NotFound
@@ -245,16 +245,94 @@ async def set_line_product(
         alias.product_id = product.id
     await session.flush()
     # The new alias may resolve the same text on other receipts that are still open.
+    await _rematch_open_lines(session)
+    await session.commit()
+    hub.publish("receipts", receipt_id=receipt_id)
+    return line
+
+
+async def _rematch_open_lines(session: AsyncSession) -> None:
     open_lines = (
         await session.scalars(
             select(ReceiptLine).where(ReceiptLine.confirmed.is_(False), ReceiptLine.kind == "item")
         )
     ).all()
-    for other in open_lines:
-        await match_line(session, other)
+    for line in open_lines:
+        await match_line(session, line)
+
+
+async def list_aliases(session: AsyncSession) -> list[ReceiptAlias]:
+    return list(
+        (await session.scalars(select(ReceiptAlias).where(ReceiptAlias.chain == CHAIN).order_by(ReceiptAlias.normalized))).all()
+    )
+
+
+async def set_product_aliases(
+    session: AsyncSession, hub: EventHub, product_id: int, texts: list[str]
+) -> ProductAliasesOut:
+    """Replace the receipt texts of a product. A text another product had moves to this one;
+    lines on receipts not yet stocked that were matched by a changed text are matched again."""
+    product = await get_product(session, product_id)
+    wanted = list(dict.fromkeys(n for n in (normalize_receipt_text(t) for t in texts) if n))
+    aliases = (
+        await session.scalars(
+            select(ReceiptAlias).where(
+                ReceiptAlias.chain == CHAIN,
+                (ReceiptAlias.product_id == product.id) | ReceiptAlias.normalized.in_(wanted),
+            )
+        )
+    ).all()
+    by_text = {a.normalized: a for a in aliases}
+    changed: set[str] = set()
+    moved: list[AliasMovedOut] = []
+    for alias in aliases:
+        if alias.product_id == product.id and alias.normalized not in wanted:
+            changed.add(alias.normalized)
+            await session.delete(alias)
+    for text in wanted:
+        alias = by_text.get(text)
+        if alias is None:
+            session.add(ReceiptAlias(chain=CHAIN, normalized=text, product_id=product.id, hits=0))
+        elif alias.product_id != product.id:
+            previous = await session.get(Product, alias.product_id)
+            moved.append(AliasMovedOut(text=text, product_id=alias.product_id, product_name=previous.name if previous else ""))
+            alias.product_id = product.id
+            changed.add(text)
+    await session.flush()
+    if changed:
+        # Lines matched by a removed or moved text, on receipts not yet stocked, are matched afresh.
+        matched = (
+            await session.scalars(
+                select(ReceiptLine)
+                .join(Receipt, Receipt.id == ReceiptLine.receipt_id)
+                .where(Receipt.stocked.is_(False), ReceiptLine.method == "alias", ReceiptLine.confirmed.is_(True))
+            )
+        ).all()
+        for line in matched:
+            if normalize_receipt_text(line.raw_text) in changed:
+                line.confirmed = False
+    await _rematch_open_lines(session)
     await session.commit()
-    hub.publish("receipts", receipt_id=receipt_id)
-    return line
+    hub.publish("receipts")
+    hub.publish("catalog")
+    current = (
+        await session.scalars(
+            select(ReceiptAlias)
+            .where(ReceiptAlias.chain == CHAIN, ReceiptAlias.product_id == product.id)
+            .order_by(ReceiptAlias.normalized)
+        )
+    ).all()
+    return ProductAliasesOut(aliases=[ReceiptAliasOut.model_validate(a) for a in current], moved=moved)
+
+
+async def delete_receipt(session: AsyncSession, hub: EventHub, receipt_id: int) -> None:
+    """Remove a receipt and its lines. What was already put into stock stays there."""
+    receipt = await session.get(Receipt, receipt_id)
+    if receipt is None:
+        raise NotFound(f"Receipt {receipt_id} not found")
+    await session.delete(receipt)
+    await session.commit()
+    hub.publish("receipts")
 
 
 async def stock_receipt(session: AsyncSession, hub: EventHub, receipt_id: int, actor: str | None = None) -> int:

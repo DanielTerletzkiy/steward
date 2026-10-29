@@ -9,7 +9,7 @@ from ..events import EventHub
 from ..models import Task
 from ..schemas import TaskIn, TaskPatch
 from ..timeutil import utcnow
-from . import NotFound
+from . import Invalid, NotFound
 
 
 async def list_tasks(session: AsyncSession, include_done: bool = True) -> list[Task]:
@@ -32,6 +32,10 @@ async def update_task(session: AsyncSession, hub: EventHub, task_id: int, patch:
     if task is None:
         raise NotFound(f"Task {task_id} not found")
     values = patch.model_dump(exclude_unset=True)
+    if "name" in values and not (values["name"] or "").strip():
+        raise Invalid("Name must not be empty")
+    if "category" in values and not values["category"]:
+        values.pop("category")
     if "done" in values:
         done = values.pop("done")
         task.done_at = (task.done_at or utcnow()) if done else None

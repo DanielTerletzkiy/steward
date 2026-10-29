@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import imaplib
 import itertools
-from datetime import datetime, timezone
+from datetime import date, datetime, timezone
 from email.message import EmailMessage
 
 import pytest
@@ -13,8 +13,19 @@ from steward_server.db import Database
 from steward_server.deposit import bottles_per_deposit, line_bottles, pieces_from_name
 from steward_server.events import EventHub
 from steward_server.models import Receipt, ReceiptLine, StockEntry
-from steward_server.schemas import LocationIn, LocationPatch, ProductIn
-from steward_server.services import Invalid, catalog, mail, receipts, stock
+from steward_server.schemas import (
+    EntryPatch,
+    LineMatchIn,
+    LocationIn,
+    LocationPatch,
+    ProductIn,
+    ProductOut,
+    ShoppingItemIn,
+    ShoppingItemPatch,
+    TaskIn,
+    TaskPatch,
+)
+from steward_server.services import Invalid, NotFound, catalog, mail, receipts, scan, shopping, stock, tasks
 
 
 @pytest.fixture
@@ -164,6 +175,103 @@ async def test_backfill_fills_old_lines(session, hub):
     assert receipt.lines[0].pieces is None
     await receipts.backfill_pieces(session)
     assert receipt.lines[0].pieces == 6
+
+
+# --- receipt texts -------------------------------------------------------------------
+
+
+async def test_product_receipt_texts_are_edited(session, hub):
+    soap = await catalog.create_product(session, hub, ProductIn(name="Cream soap"))
+    bread = await catalog.create_product(session, hub, ProductIn(name="Bread"))
+    await receipts.set_product_aliases(session, hub, bread.id, ["CREMESEIFE"])
+    receipt = _receipt([("CREMESEIFE", 1, 0.65, None), ("SEIFE  flüssig", 1, 1.29, None), ("XYZ", 1, 1.0, None)])
+    session.add(receipt)
+    await session.flush()
+    for line in receipt.lines:
+        await receipts.match_line(session, line)
+    await session.commit()
+    assert receipt.lines[0].product_id == bread.id
+
+    # Adding texts normalizes them; a text another product had moves over, and open lines follow it.
+    result = await receipts.set_product_aliases(session, hub, soap.id, ["cremeseife", "Seife flüssig", " ", "CREMESEIFE"])
+    assert [a.normalized for a in result.aliases] == ["CREMESEIFE", "SEIFE FLUESSIG"]
+    assert [(m.text, m.product_name) for m in result.moved] == [("CREMESEIFE", "Bread")]
+    await session.refresh(receipt, ["lines"])
+    assert [(line.product_id, line.method) for line in receipt.lines[:2]] == [(soap.id, "alias"), (soap.id, "alias")]
+
+    # Removing a text frees its lines again; texts confirmed by hand stay.
+    await receipts.set_line_product(session, hub, receipt.id, receipt.lines[2].id, LineMatchIn(product_id=soap.id))
+    result = await receipts.set_product_aliases(session, hub, soap.id, ["SEIFE FLUESSIG"])
+    assert [a.normalized for a in result.aliases] == ["SEIFE FLUESSIG"]
+    await session.refresh(receipt, ["lines"])
+    first, _, third = receipt.lines
+    assert first.confirmed is False and first.method != "alias"
+    assert (third.product_id, third.confirmed) == (soap.id, True)
+    assert {a.normalized for a in await receipts.list_aliases(session)} == {"SEIFE FLUESSIG"}
+
+    # Stocked receipts are history and keep their products.
+    await receipts.set_product_aliases(session, hub, bread.id, ["SEIFE FLUESSIG"])
+    receipt.stocked = True
+    await session.commit()
+    await receipts.set_product_aliases(session, hub, bread.id, [])
+    await session.refresh(receipt, ["lines"])
+    assert receipt.lines[1].product_id == bread.id
+
+
+# --- editing what was created ------------------------------------------------------
+
+
+async def test_stock_entries_are_corrected_and_undone(session, hub):
+    milk = await catalog.create_product(session, hub, ProductIn(name="Milk", min_stock=2))
+    entry = await stock.purchase(session, hub, milk.id, 3, unit_price=1.1)
+    await stock.edit_entry(session, hub, entry.id, EntryPatch(amount=1, due_date=date(2026, 11, 20), unit_price=0.99))
+    assert (entry.amount, entry.due_date, entry.unit_price) == (1, date(2026, 11, 20), 0.99)
+    correction = (await stock.journal(session))[0]
+    assert (correction.type, correction.amount) == ("correct", -2)
+    default = await shopping.default_list(session)
+    assert any(i.product_id == milk.id for i in await shopping.items(session, default.id))
+
+    await stock.edit_entry(session, hub, entry.id, EntryPatch(due_date=None))
+    assert (entry.amount, entry.due_date) == (1, None)
+    await stock.undo(session, hub, correction.id)
+    await session.refresh(entry)
+    assert entry.amount == 3
+    with pytest.raises(NotFound):
+        await stock.edit_entry(session, hub, 999, EntryPatch(amount=1))
+
+
+async def test_tasks_and_shopping_items_are_edited(session, hub):
+    task = await tasks.create_task(session, hub, TaskIn(name="Call the landlord", due_date=date(2026, 11, 3)))
+    task = await tasks.update_task(session, hub, task.id, TaskPatch(name="Call landlord", due_date=None, notes="about the heating"))
+    assert (task.name, task.due_date, task.notes, task.category) == ("Call landlord", None, "about the heating", "General")
+    with pytest.raises(Invalid):
+        await tasks.update_task(session, hub, task.id, TaskPatch(name=" "))
+
+    default = await shopping.default_list(session)
+    item = await shopping.add_item(session, hub, default.id, ShoppingItemIn(text="Apples"))
+    item = await shopping.update_item(session, hub, item.id, ShoppingItemPatch(text="Pears", amount=3, note="ripe"))
+    assert (item.text, item.amount, item.note, item.done) == ("Pears", 3, "ripe", False)
+    with pytest.raises(Invalid):
+        await shopping.update_item(session, hub, item.id, ShoppingItemPatch(amount=0))
+
+
+async def test_barcodes_are_removed_and_receipts_deleted(session, hub):
+    bread = await catalog.create_product(session, hub, ProductIn(name="Bread"))
+    product = await scan.add_barcode(session, hub, bread.id, "4001234567890")
+    assert [b.code for b in ProductOut.model_validate(product).barcodes] == ["4001234567890"]
+    product = await scan.remove_barcode(session, hub, bread.id, "4001234567890")
+    assert ProductOut.model_validate(product).barcodes == []
+    with pytest.raises(NotFound):
+        await scan.remove_barcode(session, hub, bread.id, "4001234567890")
+
+    receipt = _receipt([("BROT", 1, 2.49, None)])
+    receipt.lines[0].product_id = bread.id
+    session.add(receipt)
+    await session.commit()
+    await receipts.stock_receipt(session, hub, receipt.id)
+    await receipts.delete_receipt(session, hub, receipt.id)
+    assert await receipts.list_receipts(session) == []
+    assert (await stock.stock_overview(session))[0].amount == 1  # the stock stays
 
 
 # --- email import -------------------------------------------------------------------

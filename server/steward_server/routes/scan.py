@@ -46,3 +46,8 @@ async def recognize(
 @router.post("/products/{product_id}/barcodes", response_model=ProductOut)
 async def add_barcode(session: Session, hub: Hub, product_id: int, body: BarcodeIn):
     return await scan.add_barcode(session, hub, product_id, body.code, body.amount)
+
+
+@router.delete("/products/{product_id}/barcodes/{code}", response_model=ProductOut)
+async def remove_barcode(session: Session, hub: Hub, product_id: int, code: str):
+    return await scan.remove_barcode(session, hub, product_id, code)
