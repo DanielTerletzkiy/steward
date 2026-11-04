@@ -5,7 +5,7 @@ import type {
   GarmentIn, GarmentState, Location, ManualHit, Me, Outfit, OutfitIn, Person, Product, ProductAliases, ProductIn, Receipt, ReceiptAlias, ReceiptLine,
   ReceiptSummary, RecognizedItem, EquipmentRun, HaDevice, HaEntity, ScanLookup, ScanMode, ScanResult, ShoppingItem, ShoppingList, StockItem, StockTxn,
   StyleProfile, Summary, Task, TaskIn, WardrobeVocabulary, WeatherSettings,
-  Fulfillment, MealPlanEntry, MealPlanIn, Recipe, RecipeIn, RecipeSuggestion, StockEntry, EmailImportIn, EmailImportRun, EmailImportSettings, Terminal, TerminalPairing, AgentCommand,
+  Fulfillment, MealPlanEntry, MealPlanIn, Recipe, RecipeIn, RecipeSuggestion, StockEntry, EmailImportIn, EmailImportRun, EmailImportSettings, Terminal, TerminalPairing,
 } from './types'
 
 export class ApiError extends Error {
@@ -197,9 +197,6 @@ export const api = {
   createTerminal: (name: string) => post<TerminalPairing>('terminals', { name }),
   newPairingCode: (id: number) => post<TerminalPairing>(`terminals/${id}/code`),
   deleteTerminal: (id: number) => del(`terminals/${id}`),
-  kioskAgent: () => get<{ connected: boolean; info: { version?: string; bluetooth?: boolean } }>('kiosk/agent'),
-  agentCommand: (type: string, args: Record<string, unknown> = {}) => post<AgentCommand>('kiosk/agent/commands', { type, args }),
-  agentCommandStatus: (id: number) => get<AgentCommand>(`kiosk/agent/commands/${id}`),
   frequentProducts: (limit = 12) => get<Product[]>(`kiosk/frequent?limit=${limit}`),
   addBarcode: (productId: number, code: string, amount = 1) => post<Product>(`products/${productId}/barcodes`, { code, amount }),
   removeBarcode: (productId: number, code: string) => request<Product>('DELETE', `products/${productId}/barcodes/${encodeURIComponent(code)}`),

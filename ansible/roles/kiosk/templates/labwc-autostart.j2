@@ -1,0 +1,5 @@
+# Steward kitchen terminal. Managed by Ansible (danielterletzkiy.steward.kiosk): the desktop starts only
+# the kiosk app. Set steward_kiosk_session: desktop (or delete this file) for the normal desktop.
+# kanshi applies the screen layout from Raspberry Pi OS's Screen Configuration (rotation, resolution).
+command -v kanshi >/dev/null && kanshi &
+steward-kiosk &

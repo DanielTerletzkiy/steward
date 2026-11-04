@@ -1,0 +1,87 @@
+---
+- name: Start only the app when the desktop starts (labwc)
+  ansible.builtin.template:
+    src: labwc-autostart.j2
+    dest: "{{ steward_kiosk__home }}/.config/labwc/autostart"
+    owner: "{{ steward_kiosk_user }}"
+    group: "{{ steward_kiosk__group }}"
+    mode: "0644"
+    backup: true
+  when: steward_kiosk_session == 'kiosk' and steward_kiosk__desktop == 'labwc'
+  notify: Steward kiosk needs a reboot
+
+- name: Start only the app when the desktop starts (LXDE on X11)
+  ansible.builtin.template:
+    src: lxde-autostart.j2
+    dest: "{{ steward_kiosk__home }}/.config/lxsession/LXDE-pi/autostart"
+    owner: "{{ steward_kiosk_user }}"
+    group: "{{ steward_kiosk__group }}"
+    mode: "0644"
+    backup: true
+  when: steward_kiosk_session == 'kiosk' and steward_kiosk__desktop == 'lxde'
+  notify: Steward kiosk needs a reboot
+
+- name: Start the app with the normal desktop
+  ansible.builtin.template:
+    src: steward-kiosk.desktop.j2
+    dest: "{{ steward_kiosk__home }}/.config/autostart/steward-kiosk.desktop"
+    owner: "{{ steward_kiosk_user }}"
+    group: "{{ steward_kiosk__group }}"
+    mode: "0644"
+  when: steward_kiosk_session == 'desktop'
+  notify: Steward kiosk needs a reboot
+
+- name: Hand the desktop back
+  when: steward_kiosk_session == 'desktop'
+  block:
+    - name: Find the kiosk session files this role wrote
+      ansible.builtin.command: >-
+        grep -l -s "danielterletzkiy.steward.kiosk"
+        {{ steward_kiosk__home }}/.config/labwc/autostart
+        {{ steward_kiosk__home }}/.config/lxsession/LXDE-pi/autostart
+      register: steward_kiosk__kiosk_session
+      changed_when: false
+      failed_when: false
+      check_mode: false
+
+    - name: Remove them, so the desktop starts as usual
+      ansible.builtin.file:
+        path: "{{ item }}"
+        state: absent
+      loop: "{{ steward_kiosk__kiosk_session.stdout_lines }}"
+      notify: Steward kiosk needs a reboot
+
+- name: Don't start the app twice
+  ansible.builtin.file:
+    path: "{{ steward_kiosk__home }}/.config/autostart/steward-kiosk.desktop"
+    state: absent
+  when: steward_kiosk_session == 'kiosk'
+
+- name: Log in to the desktop by itself
+  when: steward_kiosk_autologin | bool
+  block:
+    - name: Look for raspi-config
+      ansible.builtin.stat:
+        path: /usr/bin/raspi-config
+      register: steward_kiosk__raspi_config
+
+    - name: Read the boot behaviour
+      ansible.builtin.command: raspi-config nonint {{ item }}
+      loop:
+        - get_boot_cli
+        - get_autologin
+      register: steward_kiosk__boot
+      changed_when: false
+      check_mode: false
+      when: steward_kiosk__raspi_config.stat.exists
+
+    # raspi-config answers 0 for "yes": get_boot_cli 1 = desktop, get_autologin 0 = logs in by itself.
+    - name: Boot into the desktop, logged in as the kiosk user
+      ansible.builtin.command: raspi-config nonint do_boot_behaviour B4
+      environment:
+        SUDO_USER: "{{ steward_kiosk_user }}"
+      when:
+        - steward_kiosk__raspi_config.stat.exists
+        - steward_kiosk__boot.results[0].stdout | trim != '1' or steward_kiosk__boot.results[1].stdout | trim != '0'
+      changed_when: true
+      notify: Steward kiosk needs a reboot

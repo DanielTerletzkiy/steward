@@ -1,8 +1,10 @@
 # Release: push a tag like v0.2.0 (matching `version` in app/config.yaml). This
 # - builds the app image for amd64 and aarch64 and pushes it to ghcr.io, where the app store pulls it;
-# - creates a GitHub release with zips for manual installation (the app folder and the integration),
-#   and the kitchen terminal's Raspberry Pi setup script and helper.
-# Run it by hand (Actions → Release → Run workflow) to rebuild the images without a release.
+# - builds the kitchen terminal's app (steward-kiosk .deb for arm64 and amd64) and the Ansible collection
+#   that installs it, and tests the collection's role with the amd64 package;
+# - creates a GitHub release with those, SHA256SUMS for the packages, and zips for manual installation
+#   (the app folder and the integration).
+# Run it by hand (Actions → Release → Run workflow) to rebuild everything without a release.
 name: Release
 
 on:
@@ -28,9 +30,14 @@ jobs:
           version=$(sed -nE 's/^version: *"?([^"]+)"?.*/\1/p' app/config.yaml)
           integration=$(jq -r .version custom_components/steward/manifest.json)
           echo "version=$version" >> "$GITHUB_OUTPUT"
-          if [[ "$integration" != "$version" ]]; then
-            echo "::error::app/config.yaml is $version but the integration's manifest.json is $integration"; exit 1
-          fi
+          for other in "integration's manifest.json:$integration" \
+                       "kiosk/src-tauri/tauri.conf.json:$(jq -r .version kiosk/src-tauri/tauri.conf.json)" \
+                       "kiosk/src-tauri/Cargo.toml:$(sed -nE 's/^version = "([^"]+)"/\1/p' kiosk/src-tauri/Cargo.toml | head -1)" \
+                       "ansible/galaxy.yml:$(sed -nE 's/^version: *"?([^"]+)"?.*/\1/p' ansible/galaxy.yml)"; do
+            if [[ "${other##*:}" != "$version" ]]; then
+              echo "::error::app/config.yaml is $version but ${other%:*} is ${other##*:}"; exit 1
+            fi
+          done
           if [[ "$GITHUB_REF_TYPE" == "tag" && "$GITHUB_REF_NAME" != "v$version" ]]; then
             echo "::error::Tag $GITHUB_REF_NAME doesn't match version $version in app/config.yaml"; exit 1
           fi
@@ -87,9 +94,79 @@ jobs:
           cache-from: type=gha,scope=${{ matrix.arch }}
           cache-to: type=gha,mode=max,scope=${{ matrix.arch }}
 
+  kiosk:
+    name: Kiosk app (${{ matrix.arch }})
+    needs: stage
+    runs-on: ${{ matrix.runner }}
+    # Built on Debian Bookworm, so the packages run on Raspberry Pi OS Bookworm and newer.
+    container: debian:bookworm
+    strategy:
+      matrix:
+        include:
+          - arch: amd64
+            runner: ubuntu-24.04
+          - arch: arm64
+            runner: ubuntu-24.04-arm
+    steps:
+      - name: Install build tools and libraries
+        run: |
+          apt-get update
+          apt-get install -y --no-install-recommends build-essential pkg-config curl ca-certificates git file \
+            libwebkit2gtk-4.1-dev libgtk-3-dev librsvg2-dev libdbus-1-dev libssl-dev nodejs npm
+          curl -fsSL https://sh.rustup.rs | sh -s -- -y --profile minimal
+          echo "$HOME/.cargo/bin" >> "$GITHUB_PATH"
+      - uses: actions/checkout@v7
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: kiosk/src-tauri
+          key: ${{ matrix.arch }}
+      - name: Build the package
+        working-directory: kiosk
+        run: |
+          npm ci
+          npx tauri build --bundles deb
+          cp src-tauri/target/release/bundle/deb/*.deb ../
+      - uses: actions/upload-artifact@v4
+        with:
+          name: kiosk-${{ matrix.arch }}
+          path: steward-kiosk_*.deb
+
+  collection:
+    name: Ansible collection
+    needs: [stage, kiosk]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/download-artifact@v4
+        with:
+          name: kiosk-amd64
+          path: debs
+      - uses: astral-sh/setup-uv@v10.3.3
+      - name: Install Ansible and Molecule
+        run: |
+          uv venv "$HOME/ansible"
+          VIRTUAL_ENV="$HOME/ansible" uv pip install "ansible-core>=2.17,<2.19" ansible-lint "molecule>=25" "molecule-plugins[docker]" docker
+          echo "$HOME/ansible/bin" >> "$GITHUB_PATH"
+          "$HOME/ansible/bin/ansible-galaxy" collection install community.docker ansible.posix
+      - name: Lint
+        working-directory: ansible
+        run: ansible-lint
+      - name: Test the role with the new package
+        working-directory: ansible/roles/kiosk
+        run: |
+          MOLECULE_STEWARD_KIOSK_DEB="$(ls "$GITHUB_WORKSPACE"/debs/steward-kiosk_*_amd64.deb)"
+          export MOLECULE_STEWARD_KIOSK_DEB
+          molecule test
+      - name: Build the collection
+        run: ansible-galaxy collection build ansible --output-path dist
+      - uses: actions/upload-artifact@v4
+        with:
+          name: collection
+          path: dist/*.tar.gz
+
   release:
     name: GitHub release
-    needs: [stage, image]
+    needs: [stage, image, kiosk, collection]
     if: github.ref_type == 'tag'
     runs-on: ubuntu-latest
     steps:
@@ -98,15 +175,26 @@ jobs:
         with:
           name: app
           path: dist/steward
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: kiosk-*
+          path: dist
+          merge-multiple: true
+      - uses: actions/download-artifact@v4
+        with:
+          name: collection
+          path: dist
       - name: Zip the app and the integration
         run: |
           version=${{ needs.stage.outputs.version }}
           (cd dist && zip -qr "steward-app-$version.zip" steward)
           (cd custom_components && zip -qr "../dist/steward-integration-$version.zip" steward -x '*/__pycache__/*')
+          (cd dist && sha256sum steward-kiosk_*.deb > SHA256SUMS)
       - name: Create the release
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           version=${{ needs.stage.outputs.version }}
           gh release create "$GITHUB_REF_NAME" --title "Steward $version" --generate-notes \
-            "dist/steward-app-$version.zip" "dist/steward-integration-$version.zip" kiosk/setup-pi.sh kiosk/steward-kiosk-agent
+            "dist/steward-app-$version.zip" "dist/steward-integration-$version.zip" \
+            dist/steward-kiosk_*.deb dist/SHA256SUMS "dist/danielterletzkiy-steward-$version.tar.gz"

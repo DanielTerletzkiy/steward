@@ -29,7 +29,6 @@ from .routes import terminals as terminal_routes
 from .routes import wardrobe as wardrobe_routes
 from .services import ServiceError, receipts
 from .services.files import FileStore
-from .services.terminal_agent import AgentHub
 from .services.terminals import Registry
 
 LOG = logging.getLogger("steward")
@@ -47,7 +46,6 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         app.state.files = FileStore(settings.data_dir)
         app.state.bridge = HABridge()
         app.state.terminals = Registry()
-        app.state.agents = AgentHub()
         async with db.sessions() as session:
             await receipts.backfill_pieces(session)
             await app.state.terminals.load(session)

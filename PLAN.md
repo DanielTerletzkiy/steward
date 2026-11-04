@@ -28,7 +28,7 @@ Runs locally (`docker compose -f dev/docker-compose.yml up -d`), plus an install
 - Recipes: website import (schema.org), "can I cook it" against stock, cook, missing items to the list.
 - Meal plan.
 - "Sign in with Home Assistant" for direct access; ingress identity in the app; Supervisor discovery.
-- Kitchen terminals (0.3.0, 0.4.0): a paired kiosk page for a Raspberry Pi with a scanner and camera (scan, stock and chores, recipes, AI photos), limited access, a key that keeps it paired, Bluetooth pairing through a helper on the Pi; Pi setup script.
+- Kitchen terminals (0.3.0–0.5.0): a paired kiosk page for a Raspberry Pi with a scanner and camera (scan, stock and chores, recipes, AI photos), limited access, a key that keeps it paired. Since 0.5.0 the Pi runs the Steward Kiosk app (Tauri, a .deb on the release) with Bluetooth pairing and screen control, set up by the Ansible role `danielterletzkiy.steward.kiosk`.
 
 **Integration**
 - To-do lists, sensors, calendars (chores, due dates, tasks, warranties, meal plan).

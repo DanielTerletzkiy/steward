@@ -1,0 +1,88 @@
+---
+- name: Look for the terminal's key
+  ansible.builtin.stat:
+    path: "{{ steward_kiosk__home }}/.config/steward-kiosk/key"
+  register: steward_kiosk__key_file
+
+- name: Read the key
+  ansible.builtin.slurp:
+    src: "{{ steward_kiosk__home }}/.config/steward-kiosk/key"
+  register: steward_kiosk__key
+  when: steward_kiosk__key_file.stat.exists
+  no_log: true
+
+- name: Ask Steward whether the key still works
+  ansible.builtin.uri:
+    url: "{{ steward_kiosk__origin }}/auth/terminal/session"
+    method: POST
+    body_format: json
+    body:
+      key: "{{ steward_kiosk__key.content | b64decode | trim }}"
+    status_code: [204, 401]
+    timeout: 10
+  register: steward_kiosk__session
+  when: steward_kiosk__key_file.stat.exists
+  failed_when: false
+  check_mode: false
+  no_log: true
+
+- name: Note whether the terminal needs pairing
+  ansible.builtin.set_fact:
+    # missing: no key; removed: Steward no longer knows it; valid; unknown: Steward didn't answer.
+    steward_kiosk__key_state: >-
+      {{ 'missing' if not steward_kiosk__key_file.stat.exists
+      else 'valid' if steward_kiosk__session.status | default(-1) == 204
+      else 'removed' if steward_kiosk__session.status | default(-1) == 401
+      else 'unknown' }}
+
+- name: Pair with the code
+  when:
+    - steward_kiosk__key_state in ['missing', 'removed']
+    - steward_kiosk_pairing_code | length > 0
+  block:
+    - name: Trade the pairing code for the terminal's key
+      ansible.builtin.uri:
+        url: "{{ steward_kiosk__origin }}/auth/terminal/redeem"
+        method: POST
+        body_format: json
+        body:
+          code: "{{ steward_kiosk_pairing_code }}"
+        timeout: 15
+      register: steward_kiosk__redeemed
+      failed_when: false
+      no_log: true
+
+    - name: Check that Steward accepted the code
+      ansible.builtin.assert:
+        that: steward_kiosk__redeemed.status | default(-1) == 200
+        fail_msg: >-
+          {{ 'Steward at ' ~ steward_kiosk__origin ~ " doesn't answer: check steward_kiosk_url and the Steward app's host port."
+          if steward_kiosk__redeemed.status | default(-1) <= 0
+          else 'The pairing code is wrong or has expired. Create a new one in Steward → Settings → Kitchen terminals.' }}
+        quiet: true
+
+    - name: Keep the key on the Pi
+      ansible.builtin.copy:
+        content: "{{ steward_kiosk__redeemed.json.key }}\n"
+        dest: "{{ steward_kiosk__home }}/.config/steward-kiosk/key"
+        owner: "{{ steward_kiosk_user }}"
+        group: "{{ steward_kiosk__group }}"
+        mode: "0600"
+      no_log: true
+
+- name: Say that the terminal still needs pairing
+  ansible.builtin.debug:
+    msg: >-
+      {{ 'Steward says this terminal was removed.' if steward_kiosk__key_state == 'removed' else 'This terminal is not paired yet.' }}
+      The kiosk screen asks for a pairing code; or run the role again with steward_kiosk_pairing_code
+      (Steward → Settings → Kitchen terminals).
+  when:
+    - steward_kiosk__key_state in ['missing', 'removed']
+    - steward_kiosk_pairing_code | length == 0
+
+- name: Say that the key couldn't be checked
+  ansible.builtin.debug:
+    msg: >-
+      Steward at {{ steward_kiosk__origin }} didn't answer, so the terminal's key wasn't checked. It is
+      kept; check steward_kiosk_url if the kiosk screen keeps waiting for Steward.
+  when: steward_kiosk__key_state == 'unknown'

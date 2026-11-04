@@ -1,0 +1,60 @@
+---
+- name: Verify
+  hosts: all
+  gather_facts: false
+  vars:
+    paired: "{{ lookup('env', 'MOLECULE_STEWARD_PAIRING_CODE') | length > 0 }}"
+  tasks:
+    - name: Read the app's version
+      ansible.builtin.command: steward-kiosk --version
+      register: version
+      changed_when: false
+
+    - name: Read the settings and the session
+      ansible.builtin.slurp:
+        src: "{{ item }}"
+      loop:
+        - /home/pi/.config/steward-kiosk/config.toml
+        - /home/pi/.config/labwc/autostart
+        - /tmp/raspi-config.log
+      register: files
+
+    - name: Look at the key and the old files
+      ansible.builtin.stat:
+        path: "{{ item }}"
+      loop:
+        - /home/pi/.config/steward-kiosk/key
+        - /home/pi/.local/bin/steward-kiosk
+        - /home/pi/.local/bin/steward-kiosk-agent
+        - /home/pi/.config/steward-kiosk/url
+        - /etc/chromium/policies/managed/steward-kiosk.json
+        - /home/pi/.config/autostart/steward-kiosk.desktop
+      register: paths
+
+    - name: Read the user's groups
+      ansible.builtin.command: id -nG pi
+      register: user_groups
+      changed_when: false
+
+    - name: Check
+      ansible.builtin.assert:
+        that:
+          - version.stdout is match('steward-kiosk \d+\.\d+\.\d+')
+          - "'url = \"' ~ lookup('env', 'MOLECULE_STEWARD_URL') | default('http://steward.invalid:8095', true) ~ '\"' in config"
+          - "'zoom = 1.25' in config"
+          - "'managed_by = \"ansible\"' in config"
+          - "'steward-kiosk &' in autostart and 'setup-pi.sh' not in autostart and 'swayidle' not in autostart"
+          - "'do_boot_behaviour B4 SUDO_USER=pi' in raspi_config"
+          - paths.results[0].stat.exists == (paired | bool)
+          - not paired | bool or paths.results[0].stat.mode == '0600'
+          - not paths.results[1].stat.exists
+          - not paths.results[2].stat.exists
+          - not paths.results[3].stat.exists
+          - not paths.results[4].stat.exists
+          - not paths.results[5].stat.exists
+          - "'bluetooth' in user_groups.stdout.split()"
+        quiet: true
+      vars:
+        config: "{{ files.results[0].content | b64decode }}"
+        autostart: "{{ files.results[1].content | b64decode }}"
+        raspi_config: "{{ files.results[2].content | b64decode }}"

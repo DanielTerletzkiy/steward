@@ -1,0 +1,22 @@
+---
+# Steward's address as the Pi reaches it, and the desktop user: required, see meta/argument_specs.yml.
+# steward_kiosk_url:
+# steward_kiosk_user:
+
+# A pairing code from Steward → Settings → Kitchen terminals. Used only while the Pi has no valid key.
+steward_kiosk_pairing_code: ""
+
+# The release to install: "latest", or a version such as "0.5.0".
+steward_kiosk_version: latest
+# A .deb on the controller to install instead of downloading one.
+steward_kiosk_deb_file: ""
+# Where releases come from (a fork, say).
+steward_kiosk_repository: DanielTerletzkiy/steward
+
+# kiosk: the desktop starts only the app. desktop: the normal desktop with the app on top.
+steward_kiosk_session: kiosk
+steward_kiosk_autologin: true
+steward_kiosk_bluetooth: true
+steward_kiosk_screen_off: true
+steward_kiosk_zoom: 1.0
+steward_kiosk_reboot: false

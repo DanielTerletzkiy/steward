@@ -1,0 +1,12 @@
+{
+  "name": "steward-kiosk",
+  "private": true,
+  "version": "0.5.0",
+  "scripts": {
+    "tauri": "tauri",
+    "build": "tauri build --bundles deb"
+  },
+  "devDependencies": {
+    "@tauri-apps/cli": "^2.9.0"
+  }
+}

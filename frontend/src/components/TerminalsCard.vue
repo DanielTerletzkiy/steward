@@ -10,7 +10,7 @@ import ModeCardsDialog from './ModeCardsDialog.vue'
 import type { Terminal, TerminalPairing } from '@/types'
 
 // Settings: kitchen terminals (a Raspberry Pi with a scanner, a wall tablet). Pair, re-pair, remove.
-const SETUP_SCRIPT = 'https://github.com/DanielTerletzkiy/steward/releases/latest/download/setup-pi.sh'
+const GUIDE = 'https://github.com/DanielTerletzkiy/steward/blob/master/INSTALL.md#kitchen-terminal-optional'
 const PAIR_MINUTES = 15
 
 const { data } = useResource(() => api.terminals(), ['terminals'], null)
@@ -46,9 +46,11 @@ async function newCode(terminal: Terminal) {
   const res = await attempt(() => api.newPairingCode(terminal.id))
   if (res) pairing.value = res
 }
-const pairLink = computed(() => (pairing.value && base.value ? `${base.value}auth/terminal?code=${encodeURIComponent(pairing.value.code)}` : null))
-const kioskUrl = computed(() => (base.value ? `${base.value}#/kiosk` : null))
-const setupCommand = computed(() => (pairLink.value ? `curl -fsSL ${SETUP_SCRIPT} | bash -s -- '${pairLink.value}'` : null))
+// What the Steward Kiosk app asks for on its first start, and the same for the Ansible role.
+const address = computed(() => base.value?.replace(/\/$/, '') ?? null)
+const ansibleVars = computed(() =>
+  pairing.value && address.value ? `steward_kiosk_url: ${address.value}\nsteward_kiosk_pairing_code: ${pairing.value.code}` : null,
+)
 
 async function copy(text: string, event: Event) {
   try {
@@ -116,13 +118,16 @@ const cardsOpen = ref(false)
         <div class="pair-code text-center mb-5">{{ pairing.code }}</div>
         <v-alert v-if="!base" type="warning" variant="tonal" density="compact" :text="t.terminals.noDirectUrl" />
         <template v-else>
-          <v-text-field :model-value="kioskUrl" :label="t.terminals.address" readonly variant="outlined" density="comfortable" class="mb-3" hide-details>
-            <template #append-inner><v-btn icon="mdi-content-copy" variant="text" size="small" :title="t.terminals.copy" @click="copy(kioskUrl!, $event)" /></template>
+          <v-text-field :model-value="address" :label="t.terminals.address" :hint="t.terminals.addressHint" persistent-hint readonly variant="outlined" density="comfortable" class="mb-3">
+            <template #append-inner><v-btn icon="mdi-content-copy" variant="text" size="small" :title="t.terminals.copy" @click="copy(address!, $event)" /></template>
           </v-text-field>
           <div class="text-subtitle-2 mt-4">{{ t.terminals.setup }}</div>
-          <div class="text-body-2 text-medium-emphasis mb-2">{{ t.terminals.setupHint }}</div>
-          <v-textarea :model-value="setupCommand" readonly variant="outlined" rows="3" auto-grow hide-details class="setup-command">
-            <template #append-inner><v-btn icon="mdi-content-copy" variant="text" size="small" :title="t.terminals.copy" @click="copy(setupCommand!, $event)" /></template>
+          <div class="text-body-2 text-medium-emphasis mb-2">
+            {{ t.terminals.setupHint }}
+            <a :href="GUIDE" target="_blank" rel="noopener">{{ t.terminals.guide }}</a>
+          </div>
+          <v-textarea :model-value="ansibleVars" :label="t.terminals.ansible" readonly variant="outlined" rows="2" auto-grow hide-details class="setup-command">
+            <template #append-inner><v-btn icon="mdi-content-copy" variant="text" size="small" :title="t.terminals.copy" @click="copy(ansibleVars!, $event)" /></template>
           </v-textarea>
         </template>
       </v-card-text>

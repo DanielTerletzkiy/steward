@@ -1,0 +1,18 @@
+---
+galaxy_info:
+  role_name: kiosk
+  namespace: danielterletzkiy
+  author: Daniel Terletzkiy
+  description: Set up a Raspberry Pi as Steward's kitchen terminal (the Steward Kiosk app)
+  license: All rights reserved
+  min_ansible_version: "2.15"
+  platforms:
+    - name: Debian
+      versions:
+        - bookworm
+        - trixie
+  galaxy_tags:
+    - raspberrypi
+    - kiosk
+    - homeassistant
+dependencies: []

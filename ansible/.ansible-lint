@@ -1,0 +1,8 @@
+---
+profile: production
+skip_list:
+  # The role's variables start with steward_kiosk_ (collection and role name) rather than just kiosk_,
+  # so that they can't clash with other roles' variables in an inventory.
+  - var-naming[no-role-prefix]
+  # Steward has no license file yet; Galaxy needs one only for publishing there.
+  - galaxy[no-license]

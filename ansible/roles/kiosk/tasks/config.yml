@@ -1,0 +1,17 @@
+---
+- name: Create the app's settings folder
+  ansible.builtin.file:
+    path: "{{ steward_kiosk__home }}/.config/steward-kiosk"
+    state: directory
+    owner: "{{ steward_kiosk_user }}"
+    group: "{{ steward_kiosk__group }}"
+    mode: "0700"
+
+# The app notices the change within a few seconds and applies it, so nothing needs restarting.
+- name: Write the app's settings
+  ansible.builtin.template:
+    src: config.toml.j2
+    dest: "{{ steward_kiosk__home }}/.config/steward-kiosk/config.toml"
+    owner: "{{ steward_kiosk_user }}"
+    group: "{{ steward_kiosk__group }}"
+    mode: "0644"

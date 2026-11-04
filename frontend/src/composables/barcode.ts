@@ -51,10 +51,11 @@ export const cameraAvailable = () => window.isSecureContext && !!navigator.media
  * page and report them as scans. Bursts typed into a field are ignored, unless `inFields` is set (the
  * kiosk page): then the field also gets the characters, and the caller clears it in `onCode`.
  */
-export function useWedgeScanner(onCode: (code: string) => void, opts: { inFields?: boolean } = {}) {
+export function useWedgeScanner(onCode: (code: string) => void, opts: { inFields?: boolean; enabled?: () => boolean } = {}) {
   let buffer = ''
   let last = 0
   function onKey(e: KeyboardEvent) {
+    if (opts.enabled && !opts.enabled()) return
     const target = e.target as HTMLElement | null
     const inField = target && (target.isContentEditable || ['INPUT', 'TEXTAREA', 'SELECT'].includes(target.tagName))
     if (inField && !opts.inFields) return

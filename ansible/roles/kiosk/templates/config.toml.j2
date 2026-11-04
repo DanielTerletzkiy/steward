@@ -1,0 +1,6 @@
+# Steward kitchen terminal (steward-kiosk). Managed by Ansible (danielterletzkiy.steward.kiosk): its
+# next run overwrites changes made here. The app applies changes within a few seconds.
+url = {{ steward_kiosk__origin | to_json }}
+screen_off = {{ steward_kiosk_screen_off | bool | lower }}
+zoom = {{ '%.2f' | format(steward_kiosk_zoom | float) }}
+managed_by = "ansible"

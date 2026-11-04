@@ -1,0 +1,15 @@
+---
+- name: Converge
+  hosts: all
+  become: true
+  vars:
+    steward_kiosk_url: "{{ lookup('env', 'MOLECULE_STEWARD_URL') | default('http://steward.invalid:8095', true) }}/#/kiosk"
+    steward_kiosk_user: pi
+    steward_kiosk_deb_file: "{{ lookup('env', 'MOLECULE_STEWARD_KIOSK_DEB') }}"
+    steward_kiosk_pairing_code: "{{ lookup('env', 'MOLECULE_STEWARD_PAIRING_CODE') }}"
+    steward_kiosk_zoom: 1.25
+  tasks:
+    - name: Set up the kitchen terminal
+      ansible.builtin.include_role:
+        # The role folder itself (Molecule runs from it), as the collection isn't installed here.
+        name: "{{ lookup('env', 'MOLECULE_PROJECT_DIRECTORY') }}"

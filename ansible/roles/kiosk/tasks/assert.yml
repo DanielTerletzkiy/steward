@@ -1,0 +1,58 @@
+---
+- name: Gather the facts the role needs
+  ansible.builtin.setup:
+    gather_subset:
+      - "!all"
+      - "min"
+  when: ansible_facts['os_family'] is not defined
+
+- name: Read the package architecture
+  ansible.builtin.command: dpkg --print-architecture
+  register: steward_kiosk__arch
+  changed_when: false
+  check_mode: false
+
+- name: Check that the app can run here
+  ansible.builtin.assert:
+    that:
+      - ansible_facts['os_family'] == 'Debian'
+      - steward_kiosk__arch.stdout in ['arm64', 'amd64']
+    fail_msg: >-
+      The Steward Kiosk app needs 64-bit Raspberry Pi OS or Debian (arm64 or amd64); this is
+      {{ ansible_facts['distribution'] | default('?') }} with {{ steward_kiosk__arch.stdout }} packages.
+      On a Raspberry Pi 4, 400 or 5, install Raspberry Pi OS (64-bit).
+    quiet: true
+
+- name: Look up the kiosk user
+  ansible.builtin.getent:
+    database: passwd
+    key: "{{ steward_kiosk_user }}"
+
+- name: Note the user's home, Steward's address and the desktop
+  ansible.builtin.set_fact:
+    steward_kiosk__home: "{{ ansible_facts['getent_passwd'][steward_kiosk_user][4] }}"
+    steward_kiosk__group: "{{ ansible_facts['getent_passwd'][steward_kiosk_user][2] }}"
+    # Everything from /#/ or /auth/ on is dropped, like the app does.
+    steward_kiosk__origin: "{{ steward_kiosk_url | trim | regex_replace('/(#|auth/).*$', '') | regex_replace('/+$', '') }}"
+
+- name: Find the desktop (labwc on current Raspberry Pi OS, LXDE on its older X11 desktop)
+  ansible.builtin.stat:
+    path: "{{ item }}"
+  loop:
+    - /etc/xdg/labwc
+    - /etc/xdg/lxsession/LXDE-pi
+  register: steward_kiosk__desktops
+
+- name: Note the desktop
+  ansible.builtin.set_fact:
+    steward_kiosk__desktop: >-
+      {{ 'labwc' if steward_kiosk__desktops.results[0].stat.exists
+      else ('lxde' if steward_kiosk__desktops.results[1].stat.exists else 'none') }}
+
+- name: Check that the kiosk session has a desktop to start in
+  ansible.builtin.assert:
+    that: steward_kiosk_session == 'desktop' or steward_kiosk__desktop != 'none'
+    fail_msg: >-
+      No labwc or LXDE desktop found. Use Raspberry Pi OS with desktop, or set
+      steward_kiosk_session: desktop to start the app through the desktop's autostart instead.
+    quiet: true

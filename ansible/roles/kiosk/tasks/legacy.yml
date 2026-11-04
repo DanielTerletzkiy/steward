@@ -1,0 +1,32 @@
+---
+# 0.4.0's setup-pi.sh: a Chromium launcher (with the same name as the app, earlier in PATH), the Python
+# Bluetooth helper, a Chromium policy and the kiosk address in ~/.config/steward-kiosk/url. The
+# terminal's key in ~/.config/steward-kiosk/key stays: the app uses it.
+- name: Remove the old launcher, helper, policy and address file
+  ansible.builtin.file:
+    path: "{{ item }}"
+    state: absent
+  loop:
+    - "{{ steward_kiosk__home }}/.local/bin/steward-kiosk"
+    - "{{ steward_kiosk__home }}/.local/bin/steward-kiosk-agent"
+    - /etc/chromium/policies/managed/steward-kiosk.json
+    - "{{ steward_kiosk__home }}/.config/steward-kiosk/url"
+    - "{{ steward_kiosk__home }}/.config/steward-kiosk/first-url"
+  notify: Steward kiosk needs a reboot
+
+- name: Find autostart files the setup script wrote
+  ansible.builtin.command: >-
+    grep -l -s "setup-pi.sh"
+    {{ steward_kiosk__home }}/.config/labwc/autostart
+    {{ steward_kiosk__home }}/.config/lxsession/LXDE-pi/autostart
+  register: steward_kiosk__old_autostart
+  changed_when: false
+  failed_when: false
+  check_mode: false
+
+- name: Remove them (the session tasks write the app's own)
+  ansible.builtin.file:
+    path: "{{ item }}"
+    state: absent
+  loop: "{{ steward_kiosk__old_autostart.stdout_lines }}"
+  notify: Steward kiosk needs a reboot

@@ -1,0 +1,221 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Steward Kiosk</title>
+<style>
+  :root {
+    --bg: #101413;
+    --surface: #1b2120;
+    --line: #2e3836;
+    --text: #e6edeb;
+    --muted: #9fb0ac;
+    --accent: #26a69a;
+    --accent-text: #00201c;
+    --error: #ff8a80;
+    color-scheme: dark;
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; height: 100%; }
+  body {
+    background: var(--bg);
+    color: var(--text);
+    font: 20px/1.45 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+    display: grid;
+    place-items: center;
+    padding: 24px;
+    cursor: default;
+  }
+  main { width: min(640px, 100%); }
+  header { display: flex; align-items: center; gap: 16px; margin-bottom: 28px; }
+  header svg { width: 56px; height: 56px; flex: none; }
+  h1 { font-size: 30px; margin: 0; font-weight: 650; }
+  .version { color: var(--muted); font-size: 16px; }
+  section { display: none; }
+  section.on { display: block; }
+  label { display: block; font-weight: 600; margin: 20px 0 6px; }
+  .hint { color: var(--muted); font-size: 16px; margin: 6px 0 0; }
+  input[type="text"] {
+    width: 100%;
+    font: inherit;
+    font-size: 24px;
+    padding: 14px 16px;
+    border-radius: 10px;
+    border: 2px solid var(--line);
+    background: var(--surface);
+    color: var(--text);
+    outline: none;
+  }
+  input[type="text"]:focus { border-color: var(--accent); }
+  #code { letter-spacing: 0.12em; text-transform: uppercase; }
+  .check { display: flex; align-items: center; gap: 12px; margin-top: 22px; font-weight: 400; }
+  .check input { width: 26px; height: 26px; accent-color: var(--accent); }
+  .actions { display: flex; gap: 12px; margin-top: 28px; }
+  button {
+    font: inherit;
+    font-weight: 650;
+    padding: 14px 28px;
+    border-radius: 10px;
+    border: 2px solid var(--accent);
+    background: var(--accent);
+    color: var(--accent-text);
+    cursor: pointer;
+  }
+  button.quiet { background: transparent; color: var(--text); border-color: var(--line); }
+  button:disabled { opacity: 0.5; cursor: wait; }
+  .message { margin-top: 20px; min-height: 1.5em; }
+  .message.error { color: var(--error); }
+  .note { margin-top: 18px; padding: 12px 16px; border-radius: 10px; background: var(--surface); color: var(--muted); font-size: 16px; }
+  .spinner {
+    width: 48px; height: 48px; border-radius: 50%;
+    border: 5px solid var(--line); border-top-color: var(--accent);
+    animation: spin 1s linear infinite; margin: 8px 0 24px;
+  }
+  @keyframes spin { to { transform: rotate(360deg); } }
+  .address { font-size: 24px; font-weight: 600; word-break: break-all; }
+</style>
+</head>
+<body>
+<main>
+  <header>
+    <svg viewBox="0 0 24 24" aria-hidden="true"><rect width="24" height="24" rx="6" fill="#00897b" /><path fill="#fff" d="M12 5 5 10v9h5v-5h4v5h5v-9z" /></svg>
+    <div>
+      <h1>Steward Kiosk</h1>
+      <div class="version" id="version"></div>
+    </div>
+  </header>
+
+  <section id="start"><div class="spinner"></div></section>
+
+  <section id="setup">
+    <form id="form" autocomplete="off">
+      <label for="url" data-t="address"></label>
+      <input type="text" id="url" spellcheck="false" placeholder="http://homeassistant.local:8095" />
+      <p class="hint" data-t="addressHint"></p>
+
+      <label for="code" data-t="code"></label>
+      <input type="text" id="code" spellcheck="false" placeholder="ABCD-EFGH" maxlength="12" />
+      <p class="hint" id="codeHint"></p>
+
+      <label class="check" id="autostartRow"><input type="checkbox" id="autostart" /> <span data-t="autostart"></span></label>
+      <div class="note" id="managed" hidden data-t="managed"></div>
+
+      <div class="actions">
+        <button type="submit" id="save" data-t="connect"></button>
+        <button type="button" class="quiet" id="cancel" hidden data-t="cancel"></button>
+      </div>
+      <div class="message" id="message"></div>
+    </form>
+  </section>
+
+  <section id="wait">
+    <div class="spinner"></div>
+    <div data-t="waiting"></div>
+    <div class="address" id="waitAddress"></div>
+    <p class="hint" id="problem"></p>
+    <div class="actions"><button type="button" class="quiet" id="change" data-t="change"></button></div>
+  </section>
+</main>
+
+<script>
+  const invoke = (cmd, args) => window.__TAURI_INTERNALS__.invoke(cmd, args)
+  const de = (navigator.language || '').toLowerCase().startsWith('de')
+  const T = de
+    ? {
+        address: 'Adresse von Steward',
+        addressHint: 'Steht in Steward unter Einstellungen → Küchenterminals, z. B. http://homeassistant.local:8095',
+        code: 'Kopplungscode',
+        codeHint: 'Aus Einstellungen → Küchenterminals → Terminal hinzufügen. Ohne Code fragt die Kiosk-Seite danach.',
+        codePaired: 'Dieses Terminal ist gekoppelt. Einen Code nur eingeben, um es neu zu koppeln.',
+        autostart: 'Beim Start des Desktops öffnen',
+        managed: 'Dieses Terminal wird mit Ansible eingerichtet: Änderungen hier überschreibt der nächste Lauf.',
+        connect: 'Verbinden',
+        cancel: 'Zurück',
+        connecting: 'Verbinde …',
+        done: 'Fertig, Steward wird geöffnet …',
+        waiting: 'Warte auf Steward unter',
+        change: 'Adresse ändern',
+        errAddress: 'Das ist keine Adresse. Beispiel: http://homeassistant.local:8095',
+        errUnreachable: (p) => `Steward antwortet unter dieser Adresse nicht (${p}). Prüfe die Adresse und den Host-Port der App.`,
+        errCode: 'Der Kopplungscode ist falsch oder abgelaufen. Erstelle in Steward unter Einstellungen → Küchenterminals einen neuen.',
+      }
+    : {
+        address: 'Steward address',
+        addressHint: 'Shown in Steward under Settings → Kitchen terminals, e.g. http://homeassistant.local:8095',
+        code: 'Pairing code',
+        codeHint: 'From Settings → Kitchen terminals → Add terminal. Without a code, the kiosk page asks for one.',
+        codePaired: 'This terminal is paired. Enter a code only to pair it again.',
+        autostart: 'Open when the desktop starts',
+        managed: 'This terminal is set up with Ansible: its next run overwrites changes made here.',
+        connect: 'Connect',
+        cancel: 'Back',
+        connecting: 'Connecting …',
+        done: 'Done, opening Steward …',
+        waiting: 'Waiting for Steward at',
+        change: 'Change address',
+        errAddress: "That isn't an address. Example: http://homeassistant.local:8095",
+        errUnreachable: (p) => `Steward doesn't answer at this address (${p}). Check the address and the app's host port.`,
+        errCode: 'The pairing code is wrong or has expired. Create a new one in Steward → Settings → Kitchen terminals.',
+      }
+  document.documentElement.lang = de ? 'de' : 'en'
+  for (const el of document.querySelectorAll('[data-t]')) el.textContent = T[el.dataset.t]
+
+  const $ = (id) => document.getElementById(id)
+  let poll = null
+
+  async function render() {
+    const page = location.hash.slice(1) || 'start'
+    for (const s of document.querySelectorAll('section')) s.classList.toggle('on', s.id === page)
+    clearInterval(poll)
+    const state = await invoke('setup_state').catch(() => null)
+    if (!state) return
+    $('version').textContent = state.version
+    if (page === 'setup') {
+      $('url').value = state.url || ''
+      $('code').value = ''
+      $('codeHint').textContent = state.paired ? T.codePaired : T.codeHint
+      $('autostart').checked = state.autostart
+      $('autostartRow').hidden = state.managed
+      $('managed').hidden = !state.managed
+      $('cancel').hidden = !state.url
+      $('message').textContent = ''
+      ;(state.url ? $('code') : $('url')).focus()
+    } else if (page === 'wait') {
+      const show = (s) => {
+        $('waitAddress').textContent = s.url || ''
+        $('problem').textContent = s.problem || ''
+      }
+      show(state)
+      poll = setInterval(async () => show(await invoke('setup_state')), 2000)
+    }
+  }
+
+  $('form').addEventListener('submit', async (e) => {
+    e.preventDefault()
+    const message = $('message')
+    message.className = 'message'
+    message.textContent = T.connecting
+    $('save').disabled = true
+    try {
+      const autostart = $('autostartRow').hidden ? null : $('autostart').checked
+      await invoke('save_setup', { url: $('url').value, code: $('code').value, autostart })
+      message.textContent = T.done
+    } catch (err) {
+      const text = String(err)
+      message.className = 'message error'
+      message.textContent =
+        text === 'address' ? T.errAddress
+        : text === 'code' ? T.errCode
+        : text.startsWith('unreachable: ') ? T.errUnreachable(text.slice(13))
+        : text
+      $('save').disabled = false
+    }
+  })
+  $('cancel').addEventListener('click', () => invoke('leave_setup'))
+  $('change').addEventListener('click', () => invoke('open_setup'))
+  window.addEventListener('hashchange', render)
+  render()
+</script>
+</body>
+</html>

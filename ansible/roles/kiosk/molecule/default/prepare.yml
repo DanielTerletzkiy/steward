@@ -1,0 +1,60 @@
+---
+- name: Make the container look like a Raspberry Pi set up with 0.4.0
+  hosts: all
+  gather_facts: false
+  tasks:
+    - name: Install Python for Ansible
+      ansible.builtin.raw: test -e /usr/bin/python3 || (apt-get update && apt-get install -y python3 python3-apt sudo)
+      changed_when: false
+
+    - name: Create the desktop user
+      ansible.builtin.user:
+        name: pi
+        shell: /bin/bash
+
+    - name: Pretend to have the labwc desktop
+      ansible.builtin.file:
+        path: /etc/xdg/labwc
+        state: directory
+        mode: "0755"
+
+    - name: Install a fake raspi-config that remembers the boot behaviour
+      ansible.builtin.copy:
+        dest: /usr/bin/raspi-config
+        mode: "0755"
+        content: |
+          #!/bin/sh
+          # Logs its calls; boots into the desktop, logged in, once do_boot_behaviour B4 ran.
+          echo "$* SUDO_USER=$SUDO_USER" >> /tmp/raspi-config.log
+          case "$2" in
+            get_boot_cli) if [ -f /tmp/b4 ]; then echo 1; else echo 0; fi ;;
+            get_autologin) if [ -f /tmp/b4 ]; then echo 0; else echo 1; fi ;;
+            do_boot_behaviour) touch /tmp/b4 ;;
+          esac
+
+    - name: Create the folders setup-pi.sh used
+      ansible.builtin.file:
+        path: "{{ item }}"
+        state: directory
+        owner: pi
+        group: pi
+        mode: "0755"
+      loop:
+        - /home/pi/.local/bin
+        - /home/pi/.config/labwc
+        - /home/pi/.config/steward-kiosk
+        - /etc/chromium/policies/managed
+
+    - name: Leave what setup-pi.sh wrote
+      ansible.builtin.copy:
+        dest: "{{ item.path }}"
+        content: "{{ item.content }}"
+        owner: pi
+        group: pi
+        mode: "0755"
+      loop:
+        - { path: /home/pi/.local/bin/steward-kiosk, content: "#!/bin/sh\n# Written by setup-pi.sh\n" }
+        - { path: /home/pi/.local/bin/steward-kiosk-agent, content: "#!/usr/bin/env python3\n" }
+        - { path: /home/pi/.config/steward-kiosk/url, content: "http://old.invalid:8095/#/kiosk\n" }
+        - { path: /home/pi/.config/labwc/autostart, content: "# Steward kitchen terminal (setup-pi.sh).\nswayidle -w &\n" }
+        - { path: /etc/chromium/policies/managed/steward-kiosk.json, content: "{}\n" }

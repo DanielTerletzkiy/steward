@@ -1,0 +1,22 @@
+---
+- name: Check the host
+  ansible.builtin.import_tasks: assert.yml
+
+- name: Install the Steward Kiosk app
+  ansible.builtin.import_tasks: install.yml
+
+- name: Set up Bluetooth for scanners
+  ansible.builtin.import_tasks: bluetooth.yml
+  when: steward_kiosk_bluetooth | bool
+
+- name: Remove what 0.4.0's setup script installed
+  ansible.builtin.import_tasks: legacy.yml
+
+- name: Configure the app
+  ansible.builtin.import_tasks: config.yml
+
+- name: Pair the terminal with Steward
+  ansible.builtin.import_tasks: pair.yml
+
+- name: Start the app with the desktop
+  ansible.builtin.import_tasks: session.yml

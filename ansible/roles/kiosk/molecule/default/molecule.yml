@@ -1,0 +1,29 @@
+---
+# The role in a Debian Bookworm container dressed up as Raspberry Pi OS with the labwc desktop: a fake
+# raspi-config and the leftovers of 0.4.0's setup script. Set
+#   MOLECULE_STEWARD_KIOSK_DEB      the steward-kiosk .deb to install (for this machine's architecture)
+# and, to pair against a running Steward,
+#   MOLECULE_STEWARD_URL            Steward's address from the container
+#   MOLECULE_STEWARD_NETWORK        the Docker network Steward is on
+#   MOLECULE_STEWARD_PAIRING_CODE   a fresh pairing code
+driver:
+  name: docker
+platforms:
+  - name: steward-kiosk-pi
+    image: debian:bookworm
+    pre_build_image: true
+    command: sleep infinity
+    network_mode: ${MOLECULE_STEWARD_NETWORK:-bridge}
+provisioner:
+  name: ansible
+verifier:
+  name: ansible
+scenario:
+  test_sequence:
+    - destroy
+    - create
+    - prepare
+    - converge
+    - idempotence
+    - verify
+    - destroy

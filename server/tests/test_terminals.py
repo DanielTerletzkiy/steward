@@ -184,27 +184,3 @@ def test_a_chosen_batch_is_used_and_opened(admin):
     assert [e["due_date"] for e in entries if e["opened_at"]] == ["2026-11-20"] and opened["entry_ids"]
     gone = admin.post("/api/stock/consume", json={"product_id": milk["id"], "amount": 1, "entry_id": 999})
     assert gone.status_code == 400
-
-
-def test_commands_reach_the_helper_on_the_pi(app, admin):
-    kiosk = pair(app, ok(admin.post("/api/terminals", json={"name": "Kitchen"}))["code"])
-    helper = TestClient(app, cookies={COOKIE: kiosk.cookies[COOKIE]})
-    assert not ok(kiosk.get("/api/kiosk/agent"))["connected"]
-    assert helper.post("/api/kiosk/agent/next?wait=0", json={"version": "1"}).status_code == 204
-    assert ok(kiosk.get("/api/kiosk/agent"))["connected"]
-
-    sent = ok(kiosk.post("/api/kiosk/agent/commands", json={"type": "bt_scan", "args": {"seconds": 5}}))
-    assert sent["status"] == "pending"
-    command = ok(helper.post("/api/kiosk/agent/next?wait=0", json={}))
-    assert (command["type"], command["args"]) == ("bt_scan", {"seconds": 5})
-    assert ok(kiosk.get(f"/api/kiosk/agent/commands/{sent['id']}"))["status"] == "running"
-    ok(helper.post(f"/api/kiosk/agent/commands/{sent['id']}/result", json={"ok": True, "result": {"devices": []}}))
-    assert ok(kiosk.get(f"/api/kiosk/agent/commands/{sent['id']}")) == {
-        "id": sent["id"], "type": "bt_scan", "status": "done", "result": {"devices": []}, "error": None,
-    }  # fmt: skip
-
-    assert kiosk.post("/api/kiosk/agent/commands", json={"type": "rm -rf"}).status_code == 400
-    # People and other terminals can't drive this terminal's helper.
-    assert admin.post("/api/kiosk/agent/commands", json={"type": "bt_status"}).status_code == 403
-    other = pair(app, ok(admin.post("/api/terminals", json={"name": "Hall"}))["code"])
-    assert other.get(f"/api/kiosk/agent/commands/{sent['id']}").status_code == 404

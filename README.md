@@ -19,7 +19,8 @@ The plan and decisions are in [PLAN.md](PLAN.md).
 | `frontend/` | Vue 3 + Vuetify web UI; `npm run build` writes into `server/steward_server/static` |
 | `custom_components/steward/` | Home Assistant integration |
 | `app/`, `repository.yaml` | Home Assistant app (formerly "add-on"): manifest, Dockerfile, translations, docs |
-| `kiosk/` | Raspberry Pi setup script for the kitchen terminal |
+| `kiosk/` | Steward Kiosk app for the kitchen terminal (Tauri: Rust in `src-tauri/`, its own screens in `ui/`), packaged as a .deb |
+| `ansible/` | Ansible collection `danielterletzkiy.steward`; role `kiosk` sets up the Pi |
 | `dev/` | Docker Compose demo (Home Assistant + Steward) and helper scripts |
 | `samples/ebons/` | Real REWE eBons for tests (git-ignored, personal data) |
 
@@ -86,7 +87,8 @@ The integration authenticates with `STEWARD_API_TOKEN` (`dev-token` in the demo)
 - **Kitchen terminal:** a Raspberry Pi with a screen and a barcode scanner (USB or Bluetooth), paired once under Settings → Kitchen terminals, opens a full-screen kiosk page (`#/kiosk`).
   - **Tabs:** Scan (by scanner, typing or tiles, with mode cards), Stock & chores side by side, Recipes in large print, and Photo for AI recognition with a USB camera.
   - **Access:** it can only reach stock, scanning, chores and recipes.
-  - **Setup:** `kiosk/setup-pi.sh` sets up the Pi and installs `kiosk/steward-kiosk-agent`, which pairs Bluetooth scanners for the kiosk page; see [INSTALL.md](INSTALL.md#kitchen-terminal-optional).
+  - **The app on the Pi:** the Steward Kiosk app (`kiosk/`, Tauri) shows the kiosk page full screen, pairs Bluetooth scanners, turns the screen off when idle and updates itself. It ships as a .deb on the release.
+  - **Setup:** with the Ansible role `danielterletzkiy.steward.kiosk` (`ansible/`), or by installing the .deb by hand; see [INSTALL.md](INSTALL.md#kitchen-terminal-optional).
 - **Choosing the pack:** a product's batches each have their own Use, Opened and Throw away (Stock page, Scan page, kiosk). Without a choice, opened packs go first, then the one that expires first.
 - **eBons from email:** Settings → Receipts from email. Steward checks a mailbox over IMAP every 15 minutes (configurable) for mails from REWE with a PDF and imports them.
   - Gmail needs an app password.

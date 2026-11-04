@@ -1,0 +1,24 @@
+# The Ansible collection for Steward: sets up the kitchen terminal (role danielterletzkiy.steward.kiosk).
+# Its version follows Steward's; the release workflow builds it and attaches it to the GitHub release.
+namespace: danielterletzkiy
+name: steward
+version: 0.5.0
+readme: README.md
+authors:
+  - Daniel Terletzkiy
+description: Steward's kitchen terminal on a Raspberry Pi. Installs, pairs and starts the Steward Kiosk app.
+tags:
+  - application
+  - linux
+  - raspberrypi
+  - kiosk
+  - homeassistant
+  - inventory
+repository: https://github.com/DanielTerletzkiy/steward
+documentation: https://github.com/DanielTerletzkiy/steward/blob/master/ansible/README.md
+homepage: https://github.com/DanielTerletzkiy/steward
+issues: https://github.com/DanielTerletzkiy/steward/issues
+dependencies: {}
+build_ignore:
+  - roles/*/molecule
+  - .ansible

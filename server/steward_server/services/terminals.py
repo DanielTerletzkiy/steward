@@ -43,8 +43,6 @@ ALLOWED = [
         ("POST", r"/api/chores/\d+/execute"),
         ("GET", r"/api/recipes(/suggestions|/\d+(/fulfillment)?)?"),
         ("POST", r"/api/recipes/\d+/(cook|shopping)"),
-        ("GET", r"/api/kiosk/agent(/commands/\d+)?"),
-        ("POST", r"/api/kiosk/agent/(next|commands|commands/\d+/result)"),
         ("GET", r"/api/mealplan"),
     ]
 ]

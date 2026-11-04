@@ -1,0 +1,12 @@
+---
+- name: Reboot to start the kiosk
+  ansible.builtin.reboot:
+    msg: Rebooting to start the Steward kiosk
+  when: steward_kiosk_reboot | bool
+  listen: Steward kiosk needs a reboot
+
+- name: Say that a reboot is needed
+  ansible.builtin.debug:
+    msg: Reboot {{ inventory_hostname }} to start the Steward kiosk with the new setup (or set steward_kiosk_reboot).
+  when: not steward_kiosk_reboot | bool
+  listen: Steward kiosk needs a reboot

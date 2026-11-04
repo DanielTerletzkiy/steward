@@ -1,0 +1,7 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "setup",
+  "description": "The app's own setup and waiting screens. Steward's kiosk page gets its permissions at start-up, for Steward's address only (window.rs).",
+  "windows": ["main"],
+  "permissions": ["allow-setup-state", "allow-save-setup", "allow-leave-setup", "allow-open-setup"]
+}

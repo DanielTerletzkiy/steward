@@ -1,0 +1,89 @@
+---
+argument_specs:
+  main:
+    short_description: Set up a Raspberry Pi as Steward's kitchen terminal
+    description:
+      - Installs the Steward Kiosk app (a .deb from Steward's GitHub release), pairs it with Steward and
+        starts it full screen when the desktop starts.
+      - Pairing happens only while the Pi has no valid key, so a pairing code can stay in the inventory.
+        A Pi set up with 0.4.0's setup-pi.sh keeps its key and needs no new code.
+      - Removes what 0.4.0's setup-pi.sh installed (Chromium launcher, Bluetooth helper, Chromium policy).
+      - Needs 64-bit Raspberry Pi OS (or Debian) with a desktop, Bookworm or newer.
+    author:
+      - Daniel Terletzkiy
+    options:
+      steward_kiosk_url:
+        type: str
+        required: true
+        description:
+          - Steward's address as the Pi reaches it, for example C(http://homeassistant.local:8095).
+          - In Steward, Settings → Kitchen terminals shows it when you pair a terminal. The terminal
+            reaches Steward directly, so the Steward app needs a host port for 8095/tcp.
+      steward_kiosk_user:
+        type: str
+        required: true
+        description:
+          - The desktop user that logs in on the Pi and runs the kiosk app.
+      steward_kiosk_pairing_code:
+        type: str
+        default: ""
+        description:
+          - A pairing code from Steward → Settings → Kitchen terminals (Add terminal, or Pair a new device).
+            It works once, for 15 minutes.
+          - Used only when the Pi has no key yet, or Steward says its terminal was removed. Without a
+            code, the kiosk screen asks for one.
+      steward_kiosk_version:
+        type: str
+        default: latest
+        description:
+          - The release of the kiosk app to install, such as C(0.5.0), or C(latest).
+          - Nothing is downloaded when that version is installed already.
+      steward_kiosk_deb_file:
+        type: path
+        default: ""
+        description:
+          - A steward-kiosk .deb on the controller to install instead of downloading a release, for
+            offline installations and tests. Overrides I(steward_kiosk_version).
+      steward_kiosk_repository:
+        type: str
+        default: DanielTerletzkiy/steward
+        description:
+          - The GitHub repository whose releases are installed, as C(owner/name).
+      steward_kiosk_session:
+        type: str
+        default: kiosk
+        choices:
+          - kiosk
+          - desktop
+        description:
+          - C(kiosk) starts only the app when the desktop starts, with no panel or desktop icons.
+          - C(desktop) keeps the normal desktop and starts the app on top of it.
+      steward_kiosk_autologin:
+        type: bool
+        default: true
+        description:
+          - Boot straight into the desktop as I(steward_kiosk_user), with raspi-config. Skipped where
+            raspi-config isn't installed.
+      steward_kiosk_bluetooth:
+        type: bool
+        default: true
+        description:
+          - Install BlueZ, switch Bluetooth on and let I(steward_kiosk_user) use it, so Bluetooth barcode
+            scanners can be paired from the kiosk screen.
+      steward_kiosk_screen_off:
+        type: bool
+        default: true
+        description:
+          - Turn the screen off when the kiosk page goes dark (5 minutes without use; never while a
+            recipe is open). Any key, scan or touch turns it on again.
+      steward_kiosk_zoom:
+        type: float
+        default: 1.0
+        description:
+          - Page zoom, for example C(1.25) on a small screen with a high resolution.
+      steward_kiosk_reboot:
+        type: bool
+        default: false
+        description:
+          - Reboot the Pi when a change needs it (auto-login, the bluetooth group, the desktop session,
+            removing 0.4.0's setup). Otherwise the play says that a reboot is needed.

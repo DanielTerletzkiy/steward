@@ -1,0 +1,88 @@
+---
+- name: Update the package lists
+  ansible.builtin.apt:
+    update_cache: true
+    cache_valid_time: 3600
+
+- name: Check for wlopm (switches the screen on labwc; Raspberry Pi OS has it, plain Debian Bookworm not)
+  ansible.builtin.command: apt-cache policy wlopm
+  register: steward_kiosk__wlopm
+  changed_when: false
+  failed_when: false
+  check_mode: false
+
+- name: Install what the app uses besides its dependencies (camera, screen switching)
+  ansible.builtin.apt:
+    name: "{{ ['gstreamer1.0-plugins-base', 'gstreamer1.0-plugins-good'] + steward_kiosk__screen_packages }}"
+    state: present
+  vars:
+    steward_kiosk__screen_packages: >-
+      {{ ['wlopm'] if steward_kiosk__desktop == 'labwc' and steward_kiosk__wlopm.stdout is search('Candidate: \\d')
+      else ['x11-xserver-utils'] if steward_kiosk__desktop == 'lxde' else [] }}
+
+- name: Find the installed version
+  ansible.builtin.command: dpkg-query --showformat=${Version} --show steward-kiosk
+  register: steward_kiosk__installed
+  changed_when: false
+  failed_when: false
+  check_mode: false
+
+- name: Make room for the package
+  ansible.builtin.file:
+    path: /var/cache/steward-kiosk
+    state: directory
+    owner: root
+    group: root
+    mode: "0755"
+
+- name: Install the package from the controller
+  when: steward_kiosk_deb_file | length > 0
+  block:
+    - name: Copy the package
+      ansible.builtin.copy:
+        src: "{{ steward_kiosk_deb_file }}"
+        dest: /var/cache/steward-kiosk/{{ steward_kiosk_deb_file | basename }}
+        owner: root
+        group: root
+        mode: "0644"
+
+    - name: Install the copied package
+      ansible.builtin.apt:
+        deb: /var/cache/steward-kiosk/{{ steward_kiosk_deb_file | basename }}
+
+- name: Install a release from GitHub
+  when: steward_kiosk_deb_file | length == 0
+  block:
+    - name: Ask GitHub for the latest release
+      ansible.builtin.uri:
+        url: https://api.github.com/repos/{{ steward_kiosk_repository }}/releases/latest
+        headers:
+          Accept: application/vnd.github+json
+      register: steward_kiosk__latest
+      when: steward_kiosk_version == 'latest'
+      check_mode: false
+
+    - name: Note the version to install
+      ansible.builtin.set_fact:
+        steward_kiosk__version: >-
+          {{ (steward_kiosk__latest.json.tag_name if steward_kiosk_version == 'latest' else steward_kiosk_version)
+          | regex_replace('^v', '') }}
+
+    - name: Download and install the release
+      when: steward_kiosk__installed.stdout != steward_kiosk__version
+      vars:
+        steward_kiosk__release: https://github.com/{{ steward_kiosk_repository }}/releases/download/v{{ steward_kiosk__version }}
+        steward_kiosk__deb: steward-kiosk_{{ steward_kiosk__version }}_{{ steward_kiosk__arch.stdout }}.deb
+      block:
+        - name: Download the package
+          ansible.builtin.get_url:
+            url: "{{ steward_kiosk__release }}/{{ steward_kiosk__deb }}"
+            dest: /var/cache/steward-kiosk/{{ steward_kiosk__deb }}
+            checksum: sha256:{{ steward_kiosk__release }}/SHA256SUMS
+            owner: root
+            group: root
+            mode: "0644"
+
+        - name: Install the package
+          ansible.builtin.apt:
+            deb: /var/cache/steward-kiosk/{{ steward_kiosk__deb }}

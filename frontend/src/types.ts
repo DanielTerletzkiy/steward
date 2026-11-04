@@ -780,15 +780,7 @@ export interface EmailImportSettings {
 /** What the form sends; a password left out keeps the stored one. */
 export type EmailImportIn = Partial<Omit<EmailImportSettings, 'password_set' | 'last_run'>> & { password?: string }
 
-/** A command for the kitchen terminal's helper on the Pi (Bluetooth pairing), relayed by Steward. */
-export interface AgentCommand {
-  id: number
-  type: string
-  status: 'pending' | 'running' | 'done' | 'failed'
-  result: unknown
-  error: string | null
-}
-
+/** A Bluetooth device as the Steward Kiosk app on the Pi sees it. */
 export interface BluetoothDevice {
   address: string
   name: string | null

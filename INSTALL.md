@@ -157,26 +157,62 @@ It can't open settings, receipts or anything else.
 **Set it up:**
 1. Give Steward a direct address: in the app's Network section, set a host port for `8095/tcp`, e.g. `8095`, and restart the app. The terminal can't go through Home Assistant's sidebar.
 2. In Steward, open Settings → **Kitchen terminals** → **Add terminal** and give it a name.
-   - Steward shows a pairing code and the command for the Pi.
+   - Steward shows a pairing code and Steward's address for the terminal.
    - The code works once, for 15 minutes.
-3. On the Pi, open a terminal (or connect over SSH) and paste the command:
+3. Install the **Steward Kiosk app** on the Pi: with Ansible, or by hand (both below).
+
+The app needs **64-bit Raspberry Pi OS** with desktop (Bookworm or newer): `dpkg --print-architecture` on the Pi must say `arm64`. The app:
+- shows the kiosk page full screen and stays paired;
+- pairs Bluetooth scanners from the kiosk screen;
+- turns the screen off when the page goes dark (5 minutes without use; never while a recipe is open), and on again at the next key, scan or touch;
+- allows the camera for Steward;
+- restarts after a crash and switches to a new version by itself after an update.
+
+**With Ansible** (recommended): the collection `danielterletzkiy.steward` has a role that installs the app, pairs it, starts it with the desktop, logs in automatically and sets up Bluetooth. On your computer:
 
 ```bash
-curl -fsSL https://github.com/DanielTerletzkiy/steward/releases/latest/download/setup-pi.sh | bash -s -- '<pairing link>'
+ansible-galaxy collection install https://github.com/DanielTerletzkiy/steward/releases/download/v0.5.0/danielterletzkiy-steward-0.5.0.tar.gz
 ```
 
-   The script:
-   - pairs the terminal and keeps its key on the Pi, so it stays paired through restarts;
-   - installs Chromium if needed and starts it at boot in kiosk mode on Steward's kiosk page;
-   - allows the camera for Steward, and keeping the screen on while a recipe is open (a Chromium policy for Steward's address only);
-   - installs the small helper that pairs Bluetooth scanners;
-   - turns the screen off after 10 minutes without input (a key press or scan wakes it);
-   - logs in to the desktop automatically.
+A playbook, e.g. `kitchen.yml`:
 
-   Options: `--blank-after 0` keeps the screen on; `--dry-run` only shows what it would change.
-4. Reboot the Pi.
+```yaml
+- hosts: kitchen
+  become: true
+  roles:
+    - role: danielterletzkiy.steward.kiosk
+      vars:
+        steward_kiosk_url: http://homeassistant.local:8095
+        steward_kiosk_user: pi
+```
 
-**Updating from 0.3.0:** run the command once more with a new code (Settings → Kitchen terminals → **Pair a new device**), then reboot. That brings the stored key, the camera and the Bluetooth helper. Running the script without a link later updates the setup and keeps the key.
+Run it with the pairing code, then reboot the Pi:
+
+```bash
+ansible-playbook -i kitchen-pi.local, kitchen.yml -e steward_kiosk_pairing_code=ABCD-EFGH
+```
+
+The code is only used while the Pi isn't paired, so later runs (for updates) don't need one. The role's [README](ansible/roles/kiosk/README.md) lists all settings, e.g. keeping the normal desktop.
+
+**By hand:** on the Pi:
+
+```bash
+curl -fsSLO https://github.com/DanielTerletzkiy/steward/releases/download/v0.5.0/steward-kiosk_0.5.0_arm64.deb
+```
+
+```bash
+sudo apt install ./steward-kiosk_0.5.0_arm64.deb
+```
+
+1. **First start:** open **Steward Kiosk** from the menu. Type Steward's address and the pairing code, tick **Open when the desktop starts**, then **Connect**.
+2. **Auto-login:** set it with `sudo raspi-config` → System Options → Boot / Auto Login → Desktop Autologin.
+3. **Updates:** install the next release's .deb the same way. The running app switches to it by itself.
+
+**Updating from 0.4.0** (the `setup-pi.sh` setup): the app takes over the terminal's key, so no new code is needed.
+- **With Ansible:** run the role once. It also removes the old setup (the Chromium launcher, the Bluetooth helper and the Chromium policy).
+- **By hand:** install the .deb, then delete `~/.local/bin/steward-kiosk`, `~/.local/bin/steward-kiosk-agent` and `~/.config/labwc/autostart`. Start the app once and tick **Open when the desktop starts**.
+
+Reboot afterwards either way. Until the Pi runs the app, its kiosk page works as before, but can't pair Bluetooth scanners.
 
 **Staying paired:** the terminal is signed out only when you remove it in Settings → Kitchen terminals. **Pair a new device** moves it to another device and signs out the one before.
 
@@ -194,15 +230,27 @@ curl -fsSL https://github.com/DanielTerletzkiy/steward/releases/latest/download/
 - **Mode cards:** Settings → Kitchen terminals → **Print mode cards**. Scanning a card switches the mode, so you don't need to touch the screen.
 - **History** shows the terminal's name next to what it booked.
 
-**Bluetooth scanner:** on the kiosk, tap **Bluetooth** at the bottom left.
+**Bluetooth scanner:** on the kiosk, tap **Terminal** at the bottom left.
 1. Put the scanner in pairing mode (usually a barcode in its manual).
 2. Tap **Search for scanners**, then **Pair** next to it. Scanners and keyboards are listed first.
 
-The scanner reconnects by itself after restarts. Browsers can't pair Bluetooth devices themselves, so this goes through the helper the setup script installed; if the panel says the helper isn't running, run the setup script again.
+The scanner reconnects by itself after restarts. The Terminal panel needs the Steward Kiosk app: browsers can't pair Bluetooth devices. It also shows the app's version and changes Steward's address.
 
 **Remove a terminal:** click the bin next to it in Settings → Kitchen terminals; it is signed out at once.
 
-**Back to the normal desktop on the Pi:** delete `~/.config/labwc/autostart`, `~/.local/bin/steward-kiosk` and `~/.local/bin/steward-kiosk-agent`, then reboot.
+**Back to the normal desktop on the Pi:**
+- **With Ansible:** set `steward_kiosk_session: desktop`, and the app starts on top of the desktop.
+- **Without it:** delete `~/.config/labwc/autostart`.
+- **Removing the app:** `sudo apt remove steward-kiosk`.
+
+**If something goes wrong on the Pi:**
+- **The app's log:** `~/.local/state/steward-kiosk/kiosk.log`.
+- **The page's console as well:** start the app with `STEWARD_KIOSK_DEBUG=1 steward-kiosk`.
+- **A blank or white window:** some graphics drivers need `WEBKIT_DISABLE_DMABUF_RENDERER=1` in front of `steward-kiosk` in the autostart.
+- **Its settings:** `~/.config/steward-kiosk/config.toml`; changes apply within a few seconds.
+  - `url`;
+  - `screen_off = false` keeps the screen on;
+  - `zoom`.
 
 ## Without apps (HA Container)
 
@@ -248,7 +296,7 @@ Then install or **Rebuild** Steward under Local apps.
 
 ## Releasing a new version
 
-1. Set the same version in `app/config.yaml` and `custom_components/steward/manifest.json`.
+1. Set the same version in `app/config.yaml`, `custom_components/steward/manifest.json`, the kiosk app (`kiosk/package.json`, `kiosk/src-tauri/tauri.conf.json` and `Cargo.toml`) and the Ansible collection (`ansible/galaxy.yml`).
 2. Commit, then tag and push:
 
 ```bash
@@ -258,6 +306,7 @@ git tag v0.2.0 && git push origin master v0.2.0
 The **Release** workflow then:
 - checks that the versions match the tag;
 - builds the images for `amd64` and `aarch64` and pushes them to ghcr.io;
-- creates the GitHub release with both zips.
+- builds the kiosk app's .deb for `arm64` and `amd64` and the Ansible collection, and tests the role with the new package;
+- creates the GitHub release with both zips, the .debs and their `SHA256SUMS`, and the collection.
 
 HA offers the update as soon as it sees the new version in `app/config.yaml`, which can be before the images finish building (about 10 minutes). So push the tag together with the version change.

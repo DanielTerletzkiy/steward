@@ -16,7 +16,8 @@ import KioskScan from '@/components/kiosk/KioskScan.vue'
 import KioskStock from '@/components/kiosk/KioskStock.vue'
 import KioskChores from '@/components/kiosk/KioskChores.vue'
 import KioskRecipes from '@/components/kiosk/KioskRecipes.vue'
-import KioskBluetooth from '@/components/kiosk/KioskBluetooth.vue'
+import KioskTerminal from '@/components/kiosk/KioskTerminal.vue'
+import { appCall, inApp } from '@/composables/kioskApp'
 import type { StockItem } from '@/types'
 
 // The kitchen terminal: a full-screen page for a fixed screen with a barcode scanner (and maybe a
@@ -41,7 +42,7 @@ const TABS: { value: KioskTab; icon: string }[] = [
   { value: 'recipes', icon: 'mdi-chef-hat' },
   { value: 'photo', icon: 'mdi-camera-outline' },
 ]
-const bluetoothOpen = ref(false)
+const terminalOpen = ref(false)
 
 // --- clock, idle, keeping the screen on ------------------------------------------------
 
@@ -54,8 +55,24 @@ function activity() {
   sleeping.value = false
 }
 
-// The browser's wake lock keeps the Pi's screen from blanking while cooking. It needs a secure page,
-// which the setup script's Chromium policy gives Steward's address.
+// In the Steward Kiosk app, the dark page also switches the display off (unless that is turned off in
+// the app's settings), and any key, scan or touch switches it on again.
+if (inApp) {
+  appCall('set_screen', { idle: false }).catch(() => undefined)
+  watch(sleeping, (idle) => appCall('set_screen', { idle }).catch(() => undefined))
+}
+
+// The mouse pointer only shows while the mouse moves (dialogs included, so on the whole document).
+let pointerTimer: number | undefined
+const hidePointer = (hide: boolean) => document.documentElement.classList.toggle('kiosk-no-pointer', hide)
+function pointerMoved(e: PointerEvent) {
+  if (e.pointerType !== 'mouse') return
+  hidePointer(false)
+  window.clearTimeout(pointerTimer)
+  pointerTimer = window.setTimeout(() => hidePointer(true), 3000)
+}
+
+// In a browser, the wake lock keeps the screen from blanking while cooking (it needs a secure page).
 let wakeLock: WakeLockSentinel | null = null
 async function holdScreen(on: boolean) {
   if (on && !wakeLock && 'wakeLock' in navigator && document.visibilityState === 'visible') {
@@ -93,6 +110,8 @@ onMounted(() => {
   window.addEventListener('keydown', activity, true)
   window.addEventListener('pointerdown', activity, true)
   window.addEventListener('keydown', typeAnywhere)
+  window.addEventListener('pointermove', pointerMoved)
+  hidePointer(true)
   document.addEventListener('visibilitychange', onVisible)
 })
 onBeforeUnmount(() => {
@@ -100,11 +119,15 @@ onBeforeUnmount(() => {
   window.removeEventListener('keydown', activity, true)
   window.removeEventListener('pointerdown', activity, true)
   window.removeEventListener('keydown', typeAnywhere)
+  window.removeEventListener('pointermove', pointerMoved)
+  window.clearTimeout(pointerTimer)
+  hidePointer(false)
   document.removeEventListener('visibilitychange', onVisible)
   holdScreen(false)
 })
 
-useWedgeScanner(kiosk.onScan, { inFields: true })
+// Not on the pairing screen: a code typed quickly there would look like a scan.
+useWedgeScanner(kiosk.onScan, { inFields: true, enabled: () => !auth.unpaired })
 
 // Nobody reloads a kiosk: after Steward was updated, load the new version by itself.
 watch(serverVersion, (now, before) => {
@@ -112,8 +135,13 @@ watch(serverVersion, (now, before) => {
 })
 
 // --- staying paired -------------------------------------------------------------------
-// The terminal keeps its key in local storage (and the setup script keeps it on the Pi), so a browser
-// that loses its cookie signs in again by itself. Only removing the terminal in Settings ends that.
+// The terminal keeps its key in local storage (and the Steward Kiosk app keeps it on the Pi), so a
+// browser that loses its cookie signs in again by itself. Only removing the terminal in Settings ends that.
+
+function keepKey(key: string) {
+  storage.set(KEY_STORE, key)
+  if (inApp) appCall('remember_key', { key }).catch(() => undefined)
+}
 
 const storage = {
   get: (k: string, s: Storage = localStorage) => {
@@ -136,16 +164,20 @@ const restoring = ref(false)
 const removed = ref(false)
 const cookiesBlocked = ref(false)
 
+// The key from the address (the app, or a pairing link) is kept at once: the first requests, made
+// while this page was still loading, may already have found the cookie missing.
+const keyFromUrl = typeof route.query.key === 'string' ? route.query.key : null
+if (keyFromUrl) keepKey(keyFromUrl)
+
 onMounted(async () => {
-  const fromUrl = typeof route.query.key === 'string' ? route.query.key : null
-  if (fromUrl) {
-    storage.set(KEY_STORE, fromUrl)
+  if (keyFromUrl) {
     router.replace({ path: '/kiosk' })
   } else if (!storage.get(KEY_STORE)) {
     // Paired before 0.4.0: the cookie still works, so keep its key from now on.
     const res = await fetch('auth/terminal/key', { credentials: 'same-origin' }).catch(() => null)
-    if (res?.ok) storage.set(KEY_STORE, (await res.json()).key)
+    if (res?.ok) keepKey((await res.json()).key)
   }
+  restore()
 })
 
 async function restore() {
@@ -164,6 +196,7 @@ async function restore() {
     })
     if (res.status === 401) {
       storage.set(KEY_STORE, null)
+      if (inApp) appCall('forget_key').catch(() => undefined)
       removed.value = true
     } else if (res.ok && justRestored) {
       cookiesBlocked.value = true
@@ -243,7 +276,8 @@ watch(tab, () => (kiosk.bannerUntil.value = 0))
             {{ t.kiosk.modes[m] }}
           </v-btn>
         </div>
-        <v-icon :icon="connected ? 'mdi-circle' : 'mdi-circle-outline'" :color="connected ? 'white' : 'warning'" size="14" :title="connected ? t.app.live : t.kiosk.offline" />
+        <!-- Only when the live connection to Steward is lost; while connected there is nothing to show. -->
+        <v-chip v-if="!connected" color="warning" variant="flat" size="large" prepend-icon="mdi-wifi-off" :title="t.kiosk.offline">{{ t.app.offlineShort }}</v-chip>
       </v-sheet>
 
       <div class="kiosk__frame">
@@ -263,8 +297,8 @@ watch(tab, () => (kiosk.bannerUntil.value = 0))
             {{ t.kiosk.tabs[item.value] }}
           </v-btn>
           <v-spacer />
-          <v-btn variant="text" stacked rounded="lg" height="84" class="kiosk__rail-btn" prepend-icon="mdi-bluetooth" @click="bluetoothOpen = true">
-            {{ t.kiosk.bt.title }}
+          <v-btn v-if="inApp" variant="text" stacked rounded="lg" height="84" class="kiosk__rail-btn" prepend-icon="mdi-cog-outline" @click="terminalOpen = true">
+            {{ t.kiosk.terminal.title }}
           </v-btn>
         </nav>
 
@@ -309,12 +343,12 @@ watch(tab, () => (kiosk.bannerUntil.value = 0))
       <ScanResultCard v-if="kiosk.unknown.value" :result="kiosk.unknown.value" mode="lookup" :stock="stockById" @done="kiosk.unknownDone()" @close="kiosk.unknown.value = null" />
     </v-dialog>
 
-    <v-dialog v-model="bluetoothOpen" max-width="640" scrollable>
-      <v-card :title="t.kiosk.bt.title">
-        <v-card-text><KioskBluetooth v-if="bluetoothOpen" /></v-card-text>
+    <v-dialog v-model="terminalOpen" max-width="640" scrollable>
+      <v-card :title="t.kiosk.terminal.title">
+        <v-card-text><KioskTerminal v-if="terminalOpen" /></v-card-text>
         <v-card-actions>
           <v-spacer />
-          <v-btn size="large" @click="bluetoothOpen = false">{{ t.common.close }}</v-btn>
+          <v-btn size="large" @click="terminalOpen = false">{{ t.common.close }}</v-btn>
         </v-card-actions>
       </v-card>
     </v-dialog>
@@ -425,5 +459,12 @@ watch(tab, () => (kiosk.bannerUntil.value = 0))
   justify-content: center;
   padding-bottom: 48px;
   cursor: none;
+}
+</style>
+
+<style>
+html.kiosk-no-pointer,
+html.kiosk-no-pointer * {
+  cursor: none !important;
 }
 </style>

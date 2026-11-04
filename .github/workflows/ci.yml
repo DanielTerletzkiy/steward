@@ -29,8 +29,7 @@ jobs:
     steps:
       - uses: actions/checkout@v7
       - uses: astral-sh/setup-uv@v10.3.3
-      - run: uvx ruff check server custom_components kiosk/steward-kiosk-agent
-      - run: shellcheck kiosk/setup-pi.sh
+      - run: uvx ruff check server custom_components
 
   frontend:
     name: Web UI
@@ -48,6 +47,43 @@ jobs:
       - run: npm ci
       # Type-checks, then builds into server/steward_server/static.
       - run: npm run build
+
+  kiosk:
+    name: Kiosk app
+    runs-on: ubuntu-latest
+    # Debian Bookworm, like the release build: the packages must run on Raspberry Pi OS Bookworm.
+    container: debian:bookworm
+    defaults:
+      run:
+        working-directory: kiosk/src-tauri
+    steps:
+      - name: Install build tools and libraries
+        working-directory: /
+        run: |
+          apt-get update
+          apt-get install -y --no-install-recommends build-essential pkg-config curl ca-certificates git \
+            libwebkit2gtk-4.1-dev libgtk-3-dev librsvg2-dev libdbus-1-dev libssl-dev
+          curl -fsSL https://sh.rustup.rs | sh -s -- -y --profile minimal --component clippy,rustfmt
+          echo "$HOME/.cargo/bin" >> "$GITHUB_PATH"
+      - uses: actions/checkout@v7
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: kiosk/src-tauri
+      - run: cargo fmt --check
+      - run: cargo clippy --all-targets -- -D warnings
+      - run: cargo test
+
+  ansible:
+    name: Ansible role
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: ansible
+    steps:
+      - uses: actions/checkout@v7
+      - uses: astral-sh/setup-uv@v10.3.3
+      # Uses ansible/.ansible-lint (production profile).
+      - run: uvx ansible-lint
 
   hassfest:
     name: Integration (hassfest)
