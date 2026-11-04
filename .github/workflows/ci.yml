@@ -30,6 +30,13 @@ jobs:
       - uses: actions/checkout@v7
       - uses: astral-sh/setup-uv@v10.3.3
       - run: uvx ruff check server custom_components
+      # HA's app store reads every config.json/yaml/yml in the repository as an app manifest, and one
+      # that isn't a mapping stops it from loading the repository (no updates show). Only the app's own.
+      - name: No other files named config.* for the app store
+        run: |
+          if git ls-files | grep -E '(^|/)config\.(json|ya?ml)$' | grep -v '^app/config.yaml$'; then
+            echo "::error::Rename these: Home Assistant's app store would read them as app manifests"; exit 1
+          fi
 
   frontend:
     name: Web UI

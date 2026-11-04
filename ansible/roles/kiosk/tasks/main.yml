@@ -13,7 +13,7 @@
   ansible.builtin.import_tasks: legacy.yml
 
 - name: Configure the app
-  ansible.builtin.import_tasks: config.yml
+  ansible.builtin.import_tasks: settings.yml
 
 - name: Pair the terminal with Steward
   ansible.builtin.import_tasks: pair.yml
