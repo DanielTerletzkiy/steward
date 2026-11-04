@@ -29,7 +29,7 @@ jobs:
     steps:
       - uses: actions/checkout@v7
       - uses: astral-sh/setup-uv@v10.3.3
-      - run: uvx ruff check server custom_components
+      - run: uvx ruff check server custom_components kiosk/steward-kiosk-agent
       - run: shellcheck kiosk/setup-pi.sh
 
   frontend:

@@ -22,7 +22,8 @@ from urllib.parse import urlencode, urlsplit
 
 import httpx
 from fastapi import APIRouter, HTTPException, Request
-from fastapi.responses import HTMLResponse, RedirectResponse
+from fastapi.responses import HTMLResponse, RedirectResponse, Response
+from pydantic import BaseModel
 
 from .config import Settings
 
@@ -116,22 +117,76 @@ async def callback(request: Request, code: str | None = None, state: str | None 
     return response
 
 
-@router.get("/terminal")
-async def pair_terminal(request: Request, code: str | None = None):
-    """Pair this browser as a kitchen terminal with the code from Settings → Kitchen terminals."""
-    from .services import ServiceError, terminals
+def _set_terminal_cookie(request: Request, response: Response, value: str) -> None:
+    from .services import terminals
 
-    origin = _origin(request)
-    try:
-        async with request.app.state.db.sessions() as session:
-            value = await terminals.redeem(session, request.app.state.hub, request.app.state.terminals, code or "")
-    except ServiceError as err:
-        return HTMLResponse(_page("Pairing failed", str(err), retry=f"{origin}/#/kiosk"), 400)
-    response = RedirectResponse(f"{origin}/#/kiosk", status_code=302)
     response.set_cookie(
         terminals.COOKIE, value, max_age=terminals.COOKIE_DAYS * 86400, httponly=True, samesite="lax",
         secure=request.url.scheme == "https", path="/",
     )  # fmt: skip
+
+
+async def _redeem(request: Request, code: str) -> str:
+    from .services import terminals
+
+    async with request.app.state.db.sessions() as session:
+        return await terminals.redeem(session, request.app.state.hub, request.app.state.terminals, code)
+
+
+@router.get("/terminal")
+async def pair_terminal(request: Request, code: str | None = None):
+    """Pair this browser as a kitchen terminal with the code from Settings → Kitchen terminals.
+    The kiosk page gets the terminal's key in the URL fragment (never sent to a server) and keeps it,
+    so it can sign in again when the browser loses its cookie."""
+    from .services import ServiceError
+
+    origin = _origin(request)
+    try:
+        key = await _redeem(request, code or "")
+    except ServiceError as err:
+        return HTMLResponse(_page("Pairing failed", str(err), retry=f"{origin}/#/kiosk"), 400)
+    response = RedirectResponse(f"{origin}/#/kiosk?key={key}", status_code=302)
+    _set_terminal_cookie(request, response, key)
+    return response
+
+
+class _CodeIn(BaseModel):
+    code: str
+
+
+class _KeyIn(BaseModel):
+    key: str
+
+
+@router.post("/terminal/redeem")
+async def redeem_terminal(request: Request, body: _CodeIn) -> dict[str, str]:
+    """For the Raspberry Pi setup script: trade the pairing code for the terminal's key."""
+    from .services import ServiceError
+
+    try:
+        return {"key": await _redeem(request, body.code)}
+    except ServiceError as err:
+        raise HTTPException(err.status, str(err)) from err
+
+
+@router.get("/terminal/key")
+async def terminal_key(request: Request) -> dict[str, str]:
+    """A terminal paired before 0.4.0 has only its cookie; the kiosk page keeps the key from now on."""
+    from .services.terminals import COOKIE
+
+    value = read_cookie(request.headers, COOKIE)
+    if request.app.state.terminals.identify(value) is None:
+        raise HTTPException(401, "Not a paired terminal")
+    return {"key": value}
+
+
+@router.post("/terminal/session", status_code=204)
+async def terminal_session(request: Request, body: _KeyIn) -> Response:
+    """Sign a paired terminal in again with its key. 401 once the terminal was removed in Settings."""
+    if request.app.state.terminals.identify(body.key) is None:
+        raise HTTPException(401, "This terminal was removed")
+    response = Response(status_code=204)
+    _set_terminal_cookie(request, response, body.key)
     return response
 
 

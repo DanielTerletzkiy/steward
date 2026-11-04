@@ -38,7 +38,7 @@ def pair(app, code: str) -> TestClient:
     kiosk = TestClient(app)
     response = kiosk.get("/auth/terminal", params={"code": code}, follow_redirects=False)
     assert response.status_code == 302, response.text
-    assert response.headers["location"].endswith("/#/kiosk")
+    assert "/#/kiosk?key=" in response.headers["location"]  # the page keeps the key
     assert COOKIE in kiosk.cookies
     return kiosk
 
@@ -81,7 +81,7 @@ def test_terminal_only_reaches_stock_and_scanning(app, admin):
     ok(admin.post(f"/api/products/{milk['id']}/barcodes", json={"code": "4000000000001"}))
     kiosk = pair(app, ok(admin.post("/api/terminals", json={"name": "Kitchen"}))["code"])
 
-    for path in ("/api/settings/ai", "/api/settings/email", "/api/receipts", "/api/terminals", "/api/chores", "/api/stock/journal"):
+    for path in ("/api/settings/ai", "/api/settings/email", "/api/receipts", "/api/terminals", "/api/tasks", "/api/stock/journal", "/api/equipment"):
         assert kiosk.get(path).status_code == 403, path
     assert kiosk.post("/api/terminals", json={"name": "Mine"}).status_code == 403
     assert kiosk.delete(f"/api/products/{milk['id']}").status_code == 403
@@ -122,3 +122,89 @@ def test_scan_answers_for_the_kiosk(admin):
     for product in (bread, milk):
         ok(admin.post("/api/stock/consume", json={"product_id": product["id"], "amount": 1}))
     assert [p["name"] for p in ok(admin.get("/api/kiosk/frequent"))] == ["Bread"]
+
+
+def test_key_signs_in_again_until_the_terminal_is_removed(app, admin):
+    created = ok(admin.post("/api/terminals", json={"name": "Kitchen"}))
+    # The setup script trades the code for the key itself.
+    key = ok(TestClient(app).post("/auth/terminal/redeem", json={"code": created["code"]}))["key"]
+    assert TestClient(app).post("/auth/terminal/redeem", json={"code": created["code"]}).status_code == 400
+
+    # A terminal paired with a cookie only (before 0.4.0) can read its key; others can't.
+    assert TestClient(app, cookies={COOKIE: key}).get("/auth/terminal/key").json() == {"key": key}
+    assert TestClient(app).get("/auth/terminal/key").status_code == 401
+
+    # A browser that lost its cookie (or never had one) signs in with the key.
+    browser = TestClient(app)
+    assert browser.get("/api/info").status_code == 401
+    assert browser.post("/auth/terminal/session", json={"key": key}).status_code == 204
+    ok(browser.get("/api/info"))
+    assert TestClient(app).post("/auth/terminal/session", json={"key": key[:-3] + "xxx"}).status_code == 401
+
+    ok(admin.delete(f"/api/terminals/{created['terminal']['id']}"))
+    assert browser.get("/api/info").status_code == 401
+    assert TestClient(app).post("/auth/terminal/session", json={"key": key}).status_code == 401
+
+
+def test_terminal_marks_chores_done_and_reads_recipes(app, admin):
+    ok(admin.put("/api/people", json=[{"id": "person.anna", "name": "Anna", "user_id": "u1"}]))
+    chore = ok(admin.post("/api/chores", json={"name": "Empty the bin", "schedule": "manual"}))
+    recipe = ok(admin.post("/api/recipes", json={"name": "Toast", "instructions": "Toast the bread.\nButter it."}))
+    kiosk = pair(app, ok(admin.post("/api/terminals", json={"name": "Kitchen"}))["code"])
+
+    assert [p["name"] for p in ok(kiosk.get("/api/people"))] == ["Anna"]
+    done = ok(kiosk.post(f"/api/chores/{chore['id']}/execute", json={"person_id": "person.anna"}))
+    assert done["last_done_by"] == "person.anna"
+    assert ok(kiosk.get(f"/api/recipes/{recipe['id']}"))["instructions"].startswith("Toast")
+    ok(kiosk.get(f"/api/recipes/{recipe['id']}/fulfillment"))
+    ok(kiosk.get("/api/mealplan"))
+    assert kiosk.patch(f"/api/recipes/{recipe['id']}", json={"name": "x"}).status_code == 403
+    assert kiosk.delete(f"/api/chores/{chore['id']}").status_code == 403
+
+
+def test_a_chosen_batch_is_used_and_opened(admin):
+    milk = ok(admin.post("/api/products", json={"name": "Milk"}))
+    old = ok(admin.post("/api/stock/purchase", json={"product_id": milk["id"], "amount": 1, "due_date": "2026-11-05"}))
+    new = ok(admin.post("/api/stock/purchase", json={"product_id": milk["id"], "amount": 2, "due_date": "2026-11-20"}))
+
+    # Without a choice the one that expires first goes; with a choice, the chosen one.
+    used = ok(admin.post("/api/stock/consume", json={"product_id": milk["id"], "amount": 1, "entry_id": new["entry_id"]}))
+    assert used["entry_ids"] == [new["entry_id"]]
+    amounts = {e["id"]: e["amount"] for e in ok(admin.get("/api/stock"))[0]["entries"]}
+    assert amounts == {old["entry_id"]: 1, new["entry_id"]: 1}
+
+    # More than the chosen batch holds: the rest comes from the others.
+    used = ok(admin.post("/api/stock/consume", json={"product_id": milk["id"], "amount": 1.5, "entry_id": new["entry_id"]}))
+    assert used["consumed"] == 1.5 and used["entry_ids"] == [new["entry_id"], old["entry_id"]]
+    for txn in used["txn_ids"]:
+        ok(admin.post(f"/api/stock/undo/{txn}"))
+
+    opened = ok(admin.post("/api/stock/open", json={"product_id": milk["id"], "amount": 1, "entry_id": new["entry_id"]}))
+    entries = ok(admin.get("/api/stock"))[0]["entries"]
+    assert [e["due_date"] for e in entries if e["opened_at"]] == ["2026-11-20"] and opened["entry_ids"]
+    gone = admin.post("/api/stock/consume", json={"product_id": milk["id"], "amount": 1, "entry_id": 999})
+    assert gone.status_code == 400
+
+
+def test_commands_reach_the_helper_on_the_pi(app, admin):
+    kiosk = pair(app, ok(admin.post("/api/terminals", json={"name": "Kitchen"}))["code"])
+    helper = TestClient(app, cookies={COOKIE: kiosk.cookies[COOKIE]})
+    assert not ok(kiosk.get("/api/kiosk/agent"))["connected"]
+    assert helper.post("/api/kiosk/agent/next?wait=0", json={"version": "1"}).status_code == 204
+    assert ok(kiosk.get("/api/kiosk/agent"))["connected"]
+
+    sent = ok(kiosk.post("/api/kiosk/agent/commands", json={"type": "bt_scan", "args": {"seconds": 5}}))
+    assert sent["status"] == "pending"
+    command = ok(helper.post("/api/kiosk/agent/next?wait=0", json={}))
+    assert (command["type"], command["args"]) == ("bt_scan", {"seconds": 5})
+    assert ok(kiosk.get(f"/api/kiosk/agent/commands/{sent['id']}"))["status"] == "running"
+    ok(helper.post(f"/api/kiosk/agent/commands/{sent['id']}/result", json={"ok": True, "result": {"devices": []}}))
+    assert ok(kiosk.get(f"/api/kiosk/agent/commands/{sent['id']}")) == {
+        "id": sent["id"], "type": "bt_scan", "status": "done", "result": {"devices": []}, "error": None,
+    }  # fmt: skip
+
+    assert kiosk.post("/api/kiosk/agent/commands", json={"type": "rm -rf"}).status_code == 400
+    # People and other terminals can't drive this terminal's helper.
+    assert admin.post("/api/kiosk/agent/commands", json={"type": "bt_status"}).status_code == 403
+    other = pair(app, ok(admin.post("/api/terminals", json={"name": "Hall"}))["code"])
+    assert other.get(f"/api/kiosk/agent/commands/{sent['id']}").status_code == 404

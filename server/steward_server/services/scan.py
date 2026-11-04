@@ -270,7 +270,8 @@ async def apply(
     txn_ids = await stock.txn_ids_after(session, before)
     return {
         **found, **result, "mode": mode, "done": True, "amount": amount, "product_name": product.name,
-        "unit": product.unit, "txn_ids": txn_ids, "in_stock": await stock.amount_in_stock(session, product.id),
+        "unit": product.unit, "txn_ids": txn_ids, "entry_ids": await stock.entry_ids_after(session, before),
+        "in_stock": await stock.amount_in_stock(session, product.id),
         "on_shopping_list": await shopping.is_on_list(session, product.id),
     }  # fmt: skip
 

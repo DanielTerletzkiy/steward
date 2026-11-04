@@ -42,7 +42,7 @@ export async function runScanAction(
   product: Product,
   mode: ScanMode,
   amount: number,
-  opts: { dueDate?: string | null; code?: string } = {},
+  opts: { dueDate?: string | null; code?: string; entryId?: number | null } = {},
 ): Promise<boolean> {
   let undo: Undo | false | undefined
   switch (mode) {
@@ -50,13 +50,13 @@ export async function runScanAction(
       undo = await purchase(product, amount, { due_date: opts.dueDate || null })
       break
     case 'consume':
-      undo = await consume(product, amount)
+      undo = await consume(product, amount, false, opts.entryId)
       break
     case 'spoil':
-      undo = await consume(product, amount, true)
+      undo = await consume(product, amount, true, opts.entryId)
       break
     case 'open':
-      undo = await openProduct(product, amount)
+      undo = await openProduct(product, amount, opts.entryId)
       break
     case 'shopping': {
       const added = await attempt(async () => {

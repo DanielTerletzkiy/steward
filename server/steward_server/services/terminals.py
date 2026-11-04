@@ -18,7 +18,7 @@ from ..timeutil import as_utc, utcnow
 from . import Invalid, NotFound
 
 COOKIE = "steward_terminal"
-COOKIE_DAYS = 3650
+COOKIE_DAYS = 400  # Chromium keeps cookies at most this long; the kiosk page renews it from its key
 PAIR_MINUTES = 15
 _ALPHABET = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"  # no 0/O, 1/I
 
@@ -26,7 +26,7 @@ _ALPHABET = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"  # no 0/O, 1/I
 ALLOWED = [
     (method, re.compile(pattern))
     for method, pattern in [
-        ("GET", r"/api/(info|me|summary|locations|products|stock|shopping-lists|kiosk/frequent)"),
+        ("GET", r"/api/(info|me|summary|people|locations|products|stock|shopping-lists|kiosk/frequent)"),
         ("GET", r"/api/shopping-lists/\d+/items"),
         ("GET", r"/api/scan/lookup"),
         ("GET", r"/api/files/\d+(/thumb)?"),
@@ -38,6 +38,14 @@ ALLOWED = [
         ("POST", r"/api/products/\d+/barcodes"),
         ("POST", r"/api/shopping-lists/\d+/items"),
         ("DELETE", r"/api/shopping-items/\d+"),  # undo of "To list"
+        ("POST", r"/api/scan/photo"),
+        ("GET", r"/api/chores"),
+        ("POST", r"/api/chores/\d+/execute"),
+        ("GET", r"/api/recipes(/suggestions|/\d+(/fulfillment)?)?"),
+        ("POST", r"/api/recipes/\d+/(cook|shopping)"),
+        ("GET", r"/api/kiosk/agent(/commands/\d+)?"),
+        ("POST", r"/api/kiosk/agent/(next|commands|commands/\d+/result)"),
+        ("GET", r"/api/mealplan"),
     ]
 ]
 

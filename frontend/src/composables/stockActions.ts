@@ -39,15 +39,15 @@ export async function purchase(
   return offerUndo(t.stock.purchased(product.name, formatAmount(amount, product.unit)), res.txn_ids ?? [])
 }
 
-export async function consume(product: Product, amount = 1, spoiled = false) {
-  const res = await attempt(() => api.consume(product.id, amount, spoiled))
+export async function consume(product: Product, amount = 1, spoiled = false, entryId: number | null = null) {
+  const res = await attempt(() => api.consume(product.id, amount, spoiled, entryId))
   if (!res) return false
   const text = spoiled ? t.stock.spoiled(product.name) : t.stock.consumed(product.name, formatAmount(res.consumed, product.unit))
   return offerUndo(text, res.txn_ids ?? [])
 }
 
-export async function openProduct(product: Product, amount = 1) {
-  const res = await attempt(() => api.open(product.id, amount))
+export async function openProduct(product: Product, amount = 1, entryId: number | null = null) {
+  const res = await attempt(() => api.open(product.id, amount, entryId))
   if (!res) return false
   return offerUndo(t.stock.openedMsg(product.name), res.txn_ids ?? [])
 }

@@ -147,11 +147,13 @@ class ConsumeIn(BaseModel):
     product_id: int
     amount: float = 1
     spoiled: bool = False
+    entry_id: int | None = None  # take from this batch first
 
 
 class OpenIn(BaseModel):
     product_id: int
     amount: float = 1
+    entry_id: int | None = None  # open this batch
 
 
 class StockTxnOut(BaseModel):

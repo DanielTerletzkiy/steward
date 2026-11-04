@@ -5,7 +5,7 @@ import type {
   GarmentIn, GarmentState, Location, ManualHit, Me, Outfit, OutfitIn, Person, Product, ProductAliases, ProductIn, Receipt, ReceiptAlias, ReceiptLine,
   ReceiptSummary, RecognizedItem, EquipmentRun, HaDevice, HaEntity, ScanLookup, ScanMode, ScanResult, ShoppingItem, ShoppingList, StockItem, StockTxn,
   StyleProfile, Summary, Task, TaskIn, WardrobeVocabulary, WeatherSettings,
-  Fulfillment, MealPlanEntry, MealPlanIn, Recipe, RecipeIn, RecipeSuggestion, StockEntry, EmailImportIn, EmailImportRun, EmailImportSettings, Terminal, TerminalPairing,
+  Fulfillment, MealPlanEntry, MealPlanIn, Recipe, RecipeIn, RecipeSuggestion, StockEntry, EmailImportIn, EmailImportRun, EmailImportSettings, Terminal, TerminalPairing, AgentCommand,
 } from './types'
 
 export class ApiError extends Error {
@@ -87,9 +87,11 @@ export const api = {
   journal: (limit = 100) => get<StockTxn[]>(`stock/journal?limit=${limit}`),
   purchase: (body: { product_id: number; amount: number; due_date?: string | null; location_id?: number | null; unit_price?: number | null }) =>
     post<{ entry_id: number; txn_ids: number[] }>('stock/purchase', body),
-  consume: (product_id: number, amount = 1, spoiled = false) =>
-    post<{ consumed: number; txn_ids: number[] }>('stock/consume', { product_id, amount, spoiled }),
-  open: (product_id: number, amount = 1) => post<{ txn_ids: number[] }>('stock/open', { product_id, amount }),
+  /** `entryId` picks the batch; without it the opened / first-expiring one goes first. */
+  consume: (product_id: number, amount = 1, spoiled = false, entryId: number | null = null) =>
+    post<{ consumed: number; txn_ids: number[]; entry_ids: number[] }>('stock/consume', { product_id, amount, spoiled, entry_id: entryId }),
+  open: (product_id: number, amount = 1, entryId: number | null = null) =>
+    post<{ txn_ids: number[]; entry_ids: number[] }>('stock/open', { product_id, amount, entry_id: entryId }),
   undo: (txnId: number) => post<void>(`stock/undo/${txnId}`),
 
   shoppingLists: () => get<ShoppingList[]>('shopping-lists'),
@@ -195,6 +197,9 @@ export const api = {
   createTerminal: (name: string) => post<TerminalPairing>('terminals', { name }),
   newPairingCode: (id: number) => post<TerminalPairing>(`terminals/${id}/code`),
   deleteTerminal: (id: number) => del(`terminals/${id}`),
+  kioskAgent: () => get<{ connected: boolean; info: { version?: string; bluetooth?: boolean } }>('kiosk/agent'),
+  agentCommand: (type: string, args: Record<string, unknown> = {}) => post<AgentCommand>('kiosk/agent/commands', { type, args }),
+  agentCommandStatus: (id: number) => get<AgentCommand>(`kiosk/agent/commands/${id}`),
   frequentProducts: (limit = 12) => get<Product[]>(`kiosk/frequent?limit=${limit}`),
   addBarcode: (productId: number, code: string, amount = 1) => post<Product>(`products/${productId}/barcodes`, { code, amount }),
   removeBarcode: (productId: number, code: string) => request<Product>('DELETE', `products/${productId}/barcodes/${encodeURIComponent(code)}`),

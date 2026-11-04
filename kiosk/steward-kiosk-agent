@@ -1,0 +1,225 @@
+#!/usr/bin/env python3
+"""Steward kitchen terminal helper: pairs Bluetooth barcode scanners for the kiosk page.
+
+A web page can't pair Bluetooth devices, so this runs next to Chromium on the Raspberry Pi (setup-pi.sh
+installs and starts it). It signs in to Steward as the terminal, with the key in
+~/.config/steward-kiosk/key, and waits for commands that the kiosk page sends through Steward:
+
+  bt_status            the paired devices
+  bt_scan {seconds}    look for devices nearby
+  bt_pair {address}    pair, trust (so it reconnects after a restart) and connect
+  bt_remove {address}  forget a device
+
+It only talks to Steward and to the Pi's own Bluetooth (bluetoothctl). Standard library only.
+"""
+
+from __future__ import annotations
+
+import json
+import os
+import re
+import queue
+import shutil
+import subprocess
+import sys
+import threading
+import time
+import urllib.error
+import urllib.request
+
+VERSION = "1"
+CONFIG = os.path.expanduser(os.environ.get("STEWARD_KIOSK_CONFIG", "~/.config/steward-kiosk"))
+BLUETOOTHCTL = os.environ.get("STEWARD_BLUETOOTHCTL", "bluetoothctl")
+ADDRESS = re.compile(r"^[0-9A-F]{2}(:[0-9A-F]{2}){5}$")
+
+
+def log(*parts: object) -> None:
+    print("steward-kiosk-agent:", *parts, file=sys.stderr, flush=True)
+
+
+def read(name: str) -> str:
+    with open(os.path.join(CONFIG, name)) as f:
+        return f.read().strip()
+
+
+def origin() -> str:
+    url = read("url")
+    return url.split("/#", 1)[0].split("/auth/", 1)[0].rstrip("/")
+
+
+def call(method: str, path: str, body: object | None = None, timeout: float = 40) -> tuple[int, object]:
+    data = json.dumps(body).encode() if body is not None else None
+    request = urllib.request.Request(origin() + path, data=data, method=method)
+    request.add_header("Cookie", f"steward_terminal={read('key')}")
+    if data is not None:
+        request.add_header("Content-Type", "application/json")
+    with urllib.request.urlopen(request, timeout=timeout) as response:
+        raw = response.read()
+        return response.status, json.loads(raw) if raw else None
+
+
+# --- Bluetooth ------------------------------------------------------------------
+
+
+def btctl(*args: str, timeout: float = 15) -> str:
+    done = subprocess.run([BLUETOOTHCTL, *args], capture_output=True, text=True, timeout=timeout)
+    return done.stdout
+
+
+def check_address(address: object) -> str:
+    value = str(address or "").upper()
+    if not ADDRESS.match(value):
+        raise ValueError(f"Not a Bluetooth address: {address!r}")
+    return value
+
+
+def device_info(address: str) -> dict:
+    info = {"address": address, "name": None, "icon": None, "paired": False, "trusted": False, "connected": False}
+    for line in btctl("info", address).splitlines():
+        key, _, value = line.strip().partition(": ")
+        if key in ("Name", "Alias") and value and not info["name"]:
+            info["name"] = value
+        elif key == "Icon":
+            info["icon"] = value
+        elif key in ("Paired", "Trusted", "Connected"):
+            info[key.lower()] = value.strip() == "yes"
+    return info
+
+
+def known_devices() -> list[dict]:
+    found = []
+    for line in btctl("devices").splitlines():
+        match = re.match(r"Device ([0-9A-F:]{17})", line.strip())
+        if match:
+            found.append(device_info(match.group(1)))
+    # Input devices (keyboards, scanners) first, then the ones with a name.
+    return sorted(found, key=lambda d: (not (d["icon"] or "").startswith("input"), d["name"] is None, d["name"] or ""))
+
+
+def power_on() -> bool:
+    return "succeeded" in btctl("power", "on").lower()
+
+
+def bt_status() -> dict:
+    powered = power_on()
+    return {"powered": powered, "devices": [d for d in known_devices() if d["paired"]]}
+
+
+def bt_scan(seconds: object = 12) -> dict:
+    power_on()
+    seconds = max(4, min(int(seconds or 12), 30))
+    btctl("--timeout", str(seconds), "scan", "on", timeout=seconds + 10)
+    return {"devices": known_devices()}
+
+
+def bt_pair(address: object) -> dict:
+    """Pair through an interactive bluetoothctl with an agent that needs no input, so "Just Works"
+    pairing is used. Older scanners that ask for a PIN get 0000; confirmations are answered yes."""
+    address = check_address(address)
+    power_on()
+    proc = subprocess.Popen([BLUETOOTHCTL], stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, bufsize=1)
+    lines: queue.Queue[str | None] = queue.Queue()
+
+    def pump() -> None:
+        # A thread reads the output line by line; select() on the buffered pipe would miss lines.
+        assert proc.stdout
+        for line in proc.stdout:
+            lines.put(line)
+        lines.put(None)
+
+    threading.Thread(target=pump, daemon=True).start()
+    output = ""
+
+    def send(line: str) -> None:
+        assert proc.stdin
+        proc.stdin.write(line + "\n")
+        proc.stdin.flush()
+
+    def wait_for(patterns: list[str], seconds: float) -> str | None:
+        nonlocal output
+        end = time.monotonic() + seconds
+        while (left := end - time.monotonic()) > 0:
+            try:
+                line = lines.get(timeout=left)
+            except queue.Empty:
+                return None
+            if line is None:
+                return None
+            output += line
+            if "Enter PIN code" in line:
+                send("0000")
+            elif "(yes/no)" in line:
+                send("yes")
+            for pattern in patterns:
+                if pattern in line:
+                    return pattern
+        return None
+
+    try:
+        send("agent NoInputNoOutput")
+        send("default-agent")
+        send(f"pair {address}")
+        outcome = wait_for(["Pairing successful", "Failed to pair", "AlreadyExists", "not available"], 40)
+        if outcome in (None, "Failed to pair", "not available"):
+            passkey = re.search(r"Passkey: (\d+)", output)
+            if passkey:
+                raise RuntimeError(f"The scanner wants the code {passkey.group(1)} typed on it. Scan the digits and Enter from its manual, then try again.")
+            reason = re.findall(r"Failed to pair: (\S+)", output)
+            raise RuntimeError(f"Pairing failed ({reason[-1] if reason else 'no answer'}). Put the scanner in pairing mode and try again.")
+        send(f"trust {address}")
+        wait_for(["trust succeeded", "Changing"], 10)
+        send(f"connect {address}")
+        wait_for(["Connection successful", "Failed to connect"], 20)
+    finally:
+        try:
+            send("quit")
+        except (BrokenPipeError, OSError):
+            pass
+        try:
+            proc.wait(timeout=5)
+        except subprocess.TimeoutExpired:
+            proc.kill()
+    return {"device": device_info(address)}
+
+
+def bt_remove(address: object) -> dict:
+    address = check_address(address)
+    btctl("remove", address)
+    return {"removed": address}
+
+
+HANDLERS = {"bt_status": bt_status, "bt_scan": bt_scan, "bt_pair": bt_pair, "bt_remove": bt_remove}
+
+
+def main() -> None:
+    hello = {"version": VERSION, "bluetooth": shutil.which(BLUETOOTHCTL) is not None}
+    log("started, Steward at", origin())
+    while True:
+        try:
+            status, command = call("POST", "/api/kiosk/agent/next?wait=25", hello)
+        except urllib.error.HTTPError as err:
+            # 401: not paired (yet), or the terminal was removed; check again now and then.
+            log("Steward answered", err.code)
+            time.sleep(60 if err.code in (401, 403) else 10)
+            continue
+        except (urllib.error.URLError, OSError, ValueError) as err:
+            log("can't reach Steward:", err)
+            time.sleep(5)
+            continue
+        if status == 204 or not isinstance(command, dict):
+            continue
+        handler = HANDLERS.get(str(command.get("type")))
+        try:
+            if handler is None:
+                raise ValueError(f"Unknown command {command.get('type')}")
+            result = {"ok": True, "result": handler(**(command.get("args") or {}))}
+        except Exception as err:  # noqa: BLE001 - every failure goes back to the kiosk page as text
+            result = {"ok": False, "error": str(err) or type(err).__name__}
+        try:
+            call("POST", f"/api/kiosk/agent/commands/{command['id']}/result", result)
+        except (urllib.error.URLError, OSError) as err:
+            log("could not report a result:", err)
+
+
+if __name__ == "__main__":
+    main()

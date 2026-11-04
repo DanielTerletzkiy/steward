@@ -6,14 +6,28 @@ import { useCatalog } from '@/composables/catalog'
 import { attempt, notify } from '@/composables/notify'
 import { addDays, formatAmount, formatDate, todayIso } from '@/composables/format'
 import { modeIcon, runScanAction, SCAN_MODES } from '@/composables/scanActions'
+import { batchLabel, hasBatchChoice, sortBatches } from '@/composables/batches'
 import type { Product, ScanLookup, ScanMode, StockItem } from '@/types'
 
 const props = defineProps<{ result: ScanLookup; mode: ScanMode; stock: Map<number, StockItem> }>()
 const emit = defineEmits<{ done: []; close: [] }>()
-const { state, productsById, categories, units } = useCatalog()
+const { state, productsById, locationsById, categories, units } = useCatalog()
 
 const product = computed(() => (props.result.product_id != null ? productsById.value.get(props.result.product_id) ?? null : null))
 const stockItem = computed(() => (product.value ? props.stock.get(product.value.id) ?? null : null))
+
+// Use, open or throw away a chosen batch; null = Steward's usual order (opened, then expiring first).
+const entryId = ref<number | null>(null)
+const batchChoices = computed(() => {
+  const item = stockItem.value
+  if (!item || !product.value || !['consume', 'open', 'spoil'].includes(props.mode)) return []
+  const entries = props.mode === 'open' ? item.entries.filter((e) => !e.opened_at) : item.entries
+  if (!hasBatchChoice(entries)) return []
+  return [
+    { value: null, title: t.stock.batchFirst },
+    ...sortBatches(entries).map((e) => ({ value: e.id, title: batchLabel(e, product.value!.unit, locationsById.value) })),
+  ]
+})
 
 const amount = ref<number | string>(1)
 const dueDate = ref<string | null>(null)
@@ -32,6 +46,7 @@ watch(
   () => props.result,
   (r) => {
     amount.value = r.pack_amount ?? 1
+    entryId.value = null
     dueDate.value = defaultDue(product.value)
     const s = r.suggestion
     tab.value = r.similar_product_id && !s ? 'link' : 'new'
@@ -48,7 +63,11 @@ const num = () => {
 
 async function act(p: Product, mode: ScanMode = props.mode) {
   busy.value = true
-  const ok = await runScanAction(p, mode, num(), { dueDate: mode === 'purchase' ? dueDate.value : null, code: props.result.code })
+  const ok = await runScanAction(p, mode, num(), {
+    dueDate: mode === 'purchase' ? dueDate.value : null,
+    code: props.result.code,
+    entryId: mode === props.mode ? entryId.value : null,
+  })
   busy.value = false
   if (ok) emit('done')
 }
@@ -121,6 +140,9 @@ const otherModes = computed(() => SCAN_MODES.filter((m) => m !== 'lookup'))
         <v-row v-if="mode !== 'lookup'" dense>
           <v-col :cols="mode === 'purchase' ? 5 : 12">
             <v-text-field v-model="amount" :label="t.scan.amount" type="number" min="0" step="any" :suffix="product.unit" hide-details="auto" />
+          </v-col>
+          <v-col v-if="batchChoices.length" cols="12">
+            <v-select v-model="entryId" :items="batchChoices" :label="t.stock.batch" prepend-inner-icon="mdi-calendar-range" hide-details />
           </v-col>
           <v-col v-if="mode === 'purchase'" cols="7">
             <v-text-field

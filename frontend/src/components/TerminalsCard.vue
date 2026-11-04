@@ -84,7 +84,7 @@ const cardsOpen = ref(false)
           {{ terminal.paired ? t.terminals.paired : t.terminals.waiting }}<template v-if="terminal.last_seen"> · {{ t.terminals.lastSeen(relativeTime(terminal.last_seen)) }}</template>
         </v-list-item-subtitle>
         <template #append>
-          <v-btn variant="text" size="small" prepend-icon="mdi-link-variant" @click="newCode(terminal)">{{ t.terminals.newCode }}</v-btn>
+          <v-btn variant="text" size="small" prepend-icon="mdi-link-variant" :title="t.terminals.newCodeHint" @click="newCode(terminal)">{{ t.terminals.newCode }}</v-btn>
           <v-btn variant="text" size="small" icon="mdi-delete-outline" :title="t.terminals.remove" @click="removing = terminal" />
         </template>
       </v-list-item>

@@ -42,6 +42,16 @@ def _consume_order(entry: StockEntry) -> tuple:
     return (entry.opened_at is None, entry.due_date or date.max, entry.purchased_at)
 
 
+def _chosen_first(entries: list[StockEntry], entry_id: int | None, product: Product) -> list[StockEntry]:
+    """The usual order, but with the batch the user picked first."""
+    if entry_id is None:
+        return entries
+    chosen = next((e for e in entries if e.id == entry_id), None)
+    if chosen is None:
+        raise Invalid(f"That batch of {product.name} is not in stock any more")
+    return [chosen] + [e for e in entries if e is not chosen]
+
+
 async def stock_overview(session: AsyncSession, include_empty: bool = False) -> list[StockItemOut]:
     products = {p.id: p for p in (await session.scalars(select(Product))).all()}
     by_product: dict[int, list[StockEntry]] = {}
@@ -128,17 +138,19 @@ async def consume(
     amount: float,
     *,
     spoiled: bool = False,
+    entry_id: int | None = None,
     actor: str | None = None,
     source: str = "ui",
     commit: bool = True,
 ) -> float:
-    """Take `amount` out of stock. Returns how much was actually taken."""
+    """Take `amount` out of stock, from `entry_id` first if given. Returns how much was actually taken."""
     if amount <= 0:
         raise Invalid("Amount must be positive")
     product = await get_product(session, product_id)
     entries = sorted(await _entries(session, product.id), key=_consume_order)
     if not entries:
         raise Invalid(f"{product.name} is not in stock")
+    entries = _chosen_first(entries, entry_id, product)
     remaining = amount
     for entry in entries:
         if remaining <= _EPSILON:
@@ -166,12 +178,20 @@ async def consume(
 
 
 async def open_product(
-    session: AsyncSession, hub: EventHub, product_id: int, amount: float = 1, *, actor: str | None = None
+    session: AsyncSession,
+    hub: EventHub,
+    product_id: int,
+    amount: float = 1,
+    *,
+    entry_id: int | None = None,
+    actor: str | None = None,
 ) -> None:
+    """Mark `amount` as opened, from `entry_id` first if given."""
     product = await get_product(session, product_id)
     closed = sorted((e for e in await _entries(session, product.id) if e.opened_at is None), key=_consume_order)
     if not closed:
         raise Invalid(f"No unopened {product.name} in stock")
+    closed = _chosen_first(closed, entry_id, product)
     remaining = amount
     for entry in closed:
         if remaining <= _EPSILON:
@@ -358,6 +378,12 @@ async def edit_entry(
 async def txn_ids_after(session: AsyncSession, after_id: int) -> list[int]:
     """Ledger ids written since `after_id`, so callers can offer an exact undo."""
     return list((await session.scalars(select(StockTxn.id).where(StockTxn.id > after_id).order_by(StockTxn.id))).all())
+
+
+async def entry_ids_after(session: AsyncSession, after_id: int) -> list[int]:
+    """The batches touched since `after_id`, so a scanner station can show which one was used."""
+    rows = await session.scalars(select(StockTxn.entry_id).where(StockTxn.id > after_id).order_by(StockTxn.id))
+    return list(dict.fromkeys(e for e in rows.all() if e is not None))
 
 
 async def last_txn_id(session: AsyncSession) -> int:

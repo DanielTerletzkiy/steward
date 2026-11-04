@@ -137,52 +137,72 @@ For a wall tablet, or another machine on your network:
 
 A fixed screen in the kitchen for stock: scan what you use up, add what came without an eBon. It works with:
 - a Raspberry Pi (a Pi 400, 4 or 5) with Raspberry Pi OS with desktop and a screen;
-- a USB barcode scanner, which the Pi sees as a keyboard.
+- a barcode scanner, USB or Bluetooth, which the Pi sees as a keyboard;
+- optionally a USB camera, for recognising groceries with AI.
 
 The terminal opens Steward's kiosk page full screen. It stays signed in without a Home Assistant account and can only:
 - look at, use and add stock;
 - create products for unknown barcodes;
-- put things on the shopping list.
+- put things on the shopping list;
+- see chores and mark them done;
+- read recipes and cook them.
 
 It can't open settings, receipts or anything else.
 
-**Choosing a scanner:** any USB scanner that acts as a keyboard works (around 20–30 €).
+**Choosing a scanner:** any scanner that acts as a keyboard works (around 20–40 €).
 - It must send **Enter** after the code; most do by default.
 - If codes come out wrong (e.g. `ß` instead of `-`), the scanner types for a US keyboard. Set it to the German layout with the setup barcodes in its manual.
+- **Bluetooth scanners** are paired from the kiosk screen (see below).
 
 **Set it up:**
 1. Give Steward a direct address: in the app's Network section, set a host port for `8095/tcp`, e.g. `8095`, and restart the app. The terminal can't go through Home Assistant's sidebar.
 2. In Steward, open Settings → **Kitchen terminals** → **Add terminal** and give it a name.
    - Steward shows a pairing code and the command for the Pi.
    - The code works once, for 15 minutes.
-3. On the Pi, open a terminal and paste the command:
+3. On the Pi, open a terminal (or connect over SSH) and paste the command:
 
 ```bash
 curl -fsSL https://github.com/DanielTerletzkiy/steward/releases/latest/download/setup-pi.sh | bash -s -- '<pairing link>'
 ```
 
    The script:
-   - installs Chromium if needed;
-   - starts it at boot in kiosk mode on Steward's kiosk page;
+   - pairs the terminal and keeps its key on the Pi, so it stays paired through restarts;
+   - installs Chromium if needed and starts it at boot in kiosk mode on Steward's kiosk page;
+   - allows the camera for Steward, and keeping the screen on while a recipe is open (a Chromium policy for Steward's address only);
+   - installs the small helper that pairs Bluetooth scanners;
    - turns the screen off after 10 minutes without input (a key press or scan wakes it);
    - logs in to the desktop automatically.
 
    Options: `--blank-after 0` keeps the screen on; `--dry-run` only shows what it would change.
-4. Reboot the Pi. It opens the pairing link once and then the kiosk page.
+4. Reboot the Pi.
 
-If the pairing link expired before the Pi started, the screen asks for a code: click **New pairing code** in Steward and type it on the Pi's keyboard.
+**Updating from 0.3.0:** run the command once more with a new code (Settings → Kitchen terminals → **Pair a new device**), then reboot. That brings the stored key, the camera and the Bluetooth helper. Running the script without a link later updates the setup and keeps the key.
 
-**Using it:**
-- **Use** is the default mode. **Add**, **Opened**, **Throw away** and **To list** switch back to Use after a minute without scanning.
+**Staying paired:** the terminal is signed out only when you remove it in Settings → Kitchen terminals. **Pair a new device** moves it to another device and signs out the one before.
+
+**Using it:** tabs on the left, the scan mode on top. Scanning works on every tab.
+- **Scan:**
+  - **Use** is the default mode. **Add**, **Opened**, **Throw away** and **To list** switch back to Use after a minute without scanning.
+  - Every scan is booked right away. The last one shows large with **+**, **−**, **Use all** and **Undo**. Scanning the same product again within 15 seconds counts up.
+  - **Which pack:** when a product has packs with different dates, the card shows them and highlights the one used (opened first, then the one that expires first). Tap another to take it from there instead.
+  - **Typing:** just type, no click needed. A barcode and Enter is looked up like a scan; a product name shows matches, and Enter (or a tap) books the first one.
+  - **Items without a barcode:** tiles for what you use most often (bread, eggs).
+  - **Unknown barcode:** Steward looks it up on Open Food Facts. Create the product or link the code to one you have, and the scan is booked.
+- **Stock & chores:** the stock by location on the left. Tap a product for its packs, each with **Use 1**, **Opened** and **Throw away**. Chores on the right, overdue first; **Done** asks who did it.
+- **Recipes:** today's meal plan and what you can cook first. A recipe shows its ingredients against your stock and its steps in large text, with **Cook** and **Missing → shopping list**. The screen stays on while a recipe is open.
+- **Photo:** take up to three photos with a USB camera; the AI lists what it sees. Correct names, amounts and dates with the keyboard, then add it all to stock. Needs an AI set up in Settings → AI.
 - **Mode cards:** Settings → Kitchen terminals → **Print mode cards**. Scanning a card switches the mode, so you don't need to touch the screen.
-- Every scan is booked right away. The last one shows large with **+**, **−**, **Use all** and **Undo**. Scanning the same product again within 15 seconds counts up.
-- **Items without a barcode:** tiles for what you use most often (bread, eggs), or search with the keyboard.
-- **Unknown barcode:** Steward looks it up on Open Food Facts. Create the product or link the code to one you have, and the scan is booked.
 - **History** shows the terminal's name next to what it booked.
+
+**Bluetooth scanner:** on the kiosk, tap **Bluetooth** at the bottom left.
+1. Put the scanner in pairing mode (usually a barcode in its manual).
+2. Tap **Search for scanners**, then **Pair** next to it. Scanners and keyboards are listed first.
+
+The scanner reconnects by itself after restarts. Browsers can't pair Bluetooth devices themselves, so this goes through the helper the setup script installed; if the panel says the helper isn't running, run the setup script again.
 
 **Remove a terminal:** click the bin next to it in Settings → Kitchen terminals; it is signed out at once.
 
-**Back to the normal desktop on the Pi:** delete `~/.config/labwc/autostart` and `~/.local/bin/steward-kiosk`, then reboot.
+**Back to the normal desktop on the Pi:** delete `~/.config/labwc/autostart`, `~/.local/bin/steward-kiosk` and `~/.local/bin/steward-kiosk-agent`, then reboot.
 
 ## Without apps (HA Container)
 

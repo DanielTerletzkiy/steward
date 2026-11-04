@@ -208,7 +208,7 @@ function openEntry(entry: StockEntry, product: Product) {
               <template #append>
                 <div class="d-flex align-center ga-1" @click.stop>
                   <StatusChip v-if="smAndUp" :status="i.below_min && i.status === 'out' ? 'below_min' : i.status" class="mr-2" />
-                  <v-btn icon="mdi-minus" variant="tonal" :size="smAndUp ? 'small' : 'x-small'" :disabled="i.amount <= 0" :title="t.stock.consume" @click="consume(i.product, 1)" />
+                  <v-btn icon="mdi-minus" variant="tonal" :size="smAndUp ? 'small' : 'x-small'" :disabled="i.amount <= 0" :title="t.stock.consumeFirst" @click="consume(i.product, 1)" />
                   <v-btn icon="mdi-plus" variant="tonal" color="primary" :size="smAndUp ? 'small' : 'x-small'" :title="t.stock.purchase" @click="openPurchase(i.product)" />
                   <v-menu location="bottom end">
                     <template #activator="{ props }"><v-btn v-bind="props" icon="mdi-dots-vertical" variant="text" size="small" /></template>
@@ -232,6 +232,7 @@ function openEntry(entry: StockEntry, product: Product) {
                     <v-chip v-if="i.product.min_stock" variant="outlined" prepend-icon="mdi-arrow-collapse-down">{{ t.stock.minStock }} {{ formatAmount(i.product.min_stock, i.product.unit) }}</v-chip>
                   </div>
                   <div class="text-caption text-medium-emphasis mb-1">{{ t.stock.entries }}</div>
+                  <div v-if="i.entries.length > 1" class="text-caption text-medium-emphasis mb-1">{{ t.stock.batchesHint }}</div>
                   <div v-if="!i.entries.length" class="text-body-2">{{ t.stock.noEntries }}</div>
                   <v-table v-else density="compact" class="bg-transparent">
                     <tbody>
@@ -254,7 +255,17 @@ function openEntry(entry: StockEntry, product: Product) {
                         </td>
                         <td>{{ e.unit_price != null ? formatEuro(e.unit_price) : '' }}</td>
                         <td><v-icon v-if="e.opened_at" icon="mdi-package-variant-closed-remove" size="16" :title="t.status.opened" /></td>
-                        <td class="text-right" style="width: 1%"><v-btn icon="mdi-pencil-outline" variant="text" size="x-small" :title="t.stock.editEntry" @click="openEntry(e, i.product)" /></td>
+                        <td class="text-right text-no-wrap" style="width: 1%">
+                          <v-btn icon="mdi-minus" variant="tonal" size="x-small" class="mr-1" :title="t.stock.useOne" @click="consume(i.product, Math.min(1, e.amount), false, e.id)" />
+                          <v-menu location="bottom end">
+                            <template #activator="{ props }"><v-btn v-bind="props" icon="mdi-dots-vertical" variant="text" size="x-small" /></template>
+                            <v-list density="compact">
+                              <v-list-item prepend-icon="mdi-package-variant-closed-remove" :title="t.stock.openBatch" :disabled="!!e.opened_at" @click="openProduct(i.product, Math.min(1, e.amount), e.id)" />
+                              <v-list-item prepend-icon="mdi-delete-variant" :title="t.stock.spoilBatch" @click="consume(i.product, e.amount, true, e.id)" />
+                              <v-list-item prepend-icon="mdi-pencil-outline" :title="t.stock.editEntry" @click="openEntry(e, i.product)" />
+                            </v-list>
+                          </v-menu>
+                        </td>
                       </tr>
                     </tbody>
                   </v-table>

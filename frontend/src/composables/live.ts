@@ -8,6 +8,8 @@ type Listener = (topic: Topic | '*') => void
 const listeners = new Set<{ topics: Set<string>; fn: Listener }>()
 export const connected = ref(false)
 export const everConnected = ref(false)
+/** Steward's version, from the socket's hello; changes when the server was updated while this page was open. */
+export const serverVersion = ref<string | null>(null)
 
 let socket: WebSocket | null = null
 let attempt = 0
@@ -49,6 +51,7 @@ function connect() {
     try {
       const msg = JSON.parse(ev.data)
       if (msg.type === 'event' && typeof msg.topic === 'string') emit(msg.topic)
+      else if (msg.type === 'hello' && typeof msg.version === 'string') serverVersion.value = msg.version
     } catch {
       /* ignore */
     }

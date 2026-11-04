@@ -1,339 +1,212 @@
 <script setup lang="ts">
-import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
+import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import { useRoute, useRouter } from 'vue-router'
 import { api } from '@/api'
 import { LOCALE, t } from '@/i18n'
 import { auth } from '@/composables/auth'
-import { connected } from '@/composables/live'
+import { connected, serverVersion } from '@/composables/live'
 import { useResource } from '@/composables/resource'
 import { useCatalog } from '@/composables/catalog'
 import { useWedgeScanner } from '@/composables/barcode'
-import { beepError, beepOk } from '@/composables/sound'
 import { formatAmount } from '@/composables/format'
+import { createKiosk, MODE_STYLE, MODES, provideKiosk, type KioskTab } from '@/composables/kiosk'
 import ScanResultCard from '@/components/ScanResultCard.vue'
-import type { Product, ScanLookup, StockItem } from '@/types'
+import PhotoScan from '@/components/PhotoScan.vue'
+import KioskScan from '@/components/kiosk/KioskScan.vue'
+import KioskStock from '@/components/kiosk/KioskStock.vue'
+import KioskChores from '@/components/kiosk/KioskChores.vue'
+import KioskRecipes from '@/components/kiosk/KioskRecipes.vue'
+import KioskBluetooth from '@/components/kiosk/KioskBluetooth.vue'
+import type { StockItem } from '@/types'
 
-// The kitchen terminal: a full-screen page for a fixed screen with a USB barcode scanner.
-// Every scan is booked right away; the last one shows large, with +/−, "Use all" and Undo.
-type KioskMode = 'consume' | 'purchase' | 'open' | 'spoil' | 'shopping'
-const MODES: KioskMode[] = ['consume', 'purchase', 'open', 'spoil', 'shopping']
-const STYLE: Record<KioskMode, { color: string; icon: string }> = {
-  consume: { color: 'primary', icon: 'mdi-silverware-fork-knife' },
-  purchase: { color: 'success', icon: 'mdi-cart-arrow-down' },
-  open: { color: 'info', icon: 'mdi-package-variant' },
-  spoil: { color: 'deep-orange', icon: 'mdi-delete-variant' },
-  shopping: { color: 'secondary', icon: 'mdi-cart-plus' },
-}
-const NEEDS_STOCK: KioskMode[] = ['consume', 'open', 'spoil']
-const RESET_MS = 60_000 // other modes fall back to Use
-const MERGE_MS = 15_000 // the same product again within this adds to the card
-const IDLE_MS = 5 * 60_000 // then the page goes dark
+// The kitchen terminal: a full-screen page for a fixed screen with a barcode scanner (and maybe a
+// camera). Tabs on the left, the scan mode on top; scanning works on every tab.
+const IDLE_MS = 5 * 60_000 // then the page goes dark, unless a recipe is open
+const KEY_STORE = 'steward.kiosk.key'
+const RESTORE_GUARD = 'steward.kiosk.restoredAt'
 
-const { state, productsById } = useCatalog()
+const route = useRoute()
+const router = useRouter()
+const { productsById } = useCatalog()
 const { data: stock } = useResource<StockItem[]>(() => api.stock(true), ['stock', 'catalog'], [])
 const stockById = computed(() => new Map(stock.value.map((s) => [s.product.id, s])))
-const { data: frequent } = useResource<Product[]>(() => api.frequentProducts(12), ['stock', 'catalog'], [])
 
-const mode = ref<KioskMode>('consume')
-const style = computed(() => STYLE[mode.value])
+const kiosk = createKiosk(stockById, productsById)
+provideKiosk(kiosk)
+const { mode, tab, flash } = kiosk
 
-interface Booking {
-  txnIds: number[]
-  shoppingItemId?: number
-  amount: number
-}
-interface Card {
-  key: number
-  productId: number
-  name: string
-  unit: string
-  mode: KioskMode
-  bookings: Booking[]
-  at: number
-  onList: boolean
-  undone: boolean
-}
-let nextKey = 1
-const current = ref<Card | null>(null)
-const earlier = ref<Card[]>([])
-const total = (c: Card) => c.bookings.reduce((sum, b) => sum + b.amount, 0)
-const inStock = (productId: number) => stockById.value.get(productId)?.amount ?? 0
+const TABS: { value: KioskTab; icon: string }[] = [
+  { value: 'scan', icon: 'mdi-barcode-scan' },
+  { value: 'stock', icon: 'mdi-fridge-outline' },
+  { value: 'recipes', icon: 'mdi-chef-hat' },
+  { value: 'photo', icon: 'mdi-camera-outline' },
+]
+const bluetoothOpen = ref(false)
 
-// --- feedback, clock, idle -------------------------------------------------
-
-const flash = ref<'ok' | 'error' | null>(null)
-const message = ref<string | null>(null)
-let flashTimer: number | undefined
-function signal(kind: 'ok' | 'error', text: string | null = null) {
-  flash.value = kind
-  message.value = text
-  if (kind === 'ok') beepOk()
-  else beepError()
-  window.clearTimeout(flashTimer)
-  flashTimer = window.setTimeout(() => (flash.value = null), 700)
-}
-const errorText = (e: unknown) => (!connected.value ? t.kiosk.offline : e instanceof Error ? e.message : t.kiosk.failed)
+// --- clock, idle, keeping the screen on ------------------------------------------------
 
 const now = ref(Date.now())
 let lastActive = Date.now()
-let lastModeUse = Date.now()
 const sleeping = ref(false)
 const clock = new Intl.DateTimeFormat(LOCALE, { hour: '2-digit', minute: '2-digit' })
-const timeFmt = new Intl.DateTimeFormat(LOCALE, { hour: '2-digit', minute: '2-digit' })
-
 function activity() {
   lastActive = Date.now()
   sleeping.value = false
 }
+
+// The browser's wake lock keeps the Pi's screen from blanking while cooking. It needs a secure page,
+// which the setup script's Chromium policy gives Steward's address.
+let wakeLock: WakeLockSentinel | null = null
+async function holdScreen(on: boolean) {
+  if (on && !wakeLock && 'wakeLock' in navigator && document.visibilityState === 'visible') {
+    wakeLock = await navigator.wakeLock.request('screen').catch(() => null)
+    wakeLock?.addEventListener('release', () => (wakeLock = null))
+  } else if (!on && wakeLock) {
+    await wakeLock.release().catch(() => undefined)
+    wakeLock = null
+  }
+}
+watch(kiosk.keepAwake, holdScreen)
+const onVisible = () => holdScreen(kiosk.keepAwake.value)
+
+// Typing anywhere goes into the active tab's field, without clicking into it first.
+function typeAnywhere(e: KeyboardEvent) {
+  if (e.defaultPrevented || e.ctrlKey || e.metaKey || e.altKey || e.key.length !== 1) return
+  const active = document.activeElement as HTMLElement | null
+  if (active && (active.isContentEditable || ['INPUT', 'TEXTAREA', 'SELECT'].includes(active.tagName))) return
+  const target = kiosk.focusTarget.value
+  if (!target || document.querySelector('.v-overlay--active')) return
+  e.preventDefault()
+  target.focus()
+  target.value += e.key
+  target.dispatchEvent(new Event('input', { bubbles: true }))
+}
+
 let ticker: number | undefined
 onMounted(() => {
   ticker = window.setInterval(() => {
     now.value = Date.now()
-    if (mode.value !== 'consume' && now.value - lastModeUse > RESET_MS) mode.value = 'consume'
-    if (!sleeping.value && now.value - lastActive > IDLE_MS) sleeping.value = true
+    kiosk.tick(now.value)
+    if (kiosk.keepAwake.value) lastActive = now.value
+    else if (!sleeping.value && now.value - lastActive > IDLE_MS) sleeping.value = true
   }, 1000)
   window.addEventListener('keydown', activity, true)
   window.addEventListener('pointerdown', activity, true)
+  window.addEventListener('keydown', typeAnywhere)
+  document.addEventListener('visibilitychange', onVisible)
 })
 onBeforeUnmount(() => {
   window.clearInterval(ticker)
-  window.clearTimeout(flashTimer)
   window.removeEventListener('keydown', activity, true)
   window.removeEventListener('pointerdown', activity, true)
+  window.removeEventListener('keydown', typeAnywhere)
+  document.removeEventListener('visibilitychange', onVisible)
+  holdScreen(false)
 })
 
-function setMode(m: KioskMode) {
-  mode.value = m
-  lastModeUse = Date.now()
-}
+useWedgeScanner(kiosk.onScan, { inFields: true })
 
-// --- booking ----------------------------------------------------------------
+// Nobody reloads a kiosk: after Steward was updated, load the new version by itself.
+watch(serverVersion, (now, before) => {
+  if (before && now && now !== before) window.location.reload()
+})
 
-async function bookDirect(productId: number, m: KioskMode, amount: number): Promise<Booking> {
-  switch (m) {
-    case 'purchase':
-      return { txnIds: (await api.purchase({ product_id: productId, amount })).txn_ids, amount }
-    case 'consume':
-    case 'spoil': {
-      const res = await api.consume(productId, amount, m === 'spoil')
-      return { txnIds: res.txn_ids, amount: res.consumed }
+// --- staying paired -------------------------------------------------------------------
+// The terminal keeps its key in local storage (and the setup script keeps it on the Pi), so a browser
+// that loses its cookie signs in again by itself. Only removing the terminal in Settings ends that.
+
+const storage = {
+  get: (k: string, s: Storage = localStorage) => {
+    try {
+      return s.getItem(k)
+    } catch {
+      return null
     }
-    case 'open':
-      return { txnIds: (await api.open(productId, amount)).txn_ids, amount }
-    case 'shopping': {
-      const lists = await api.shoppingLists()
-      const item = await api.addShoppingItem(lists[0].id, { product_id: productId, amount })
-      return { txnIds: [], shoppingItemId: item.id, amount }
+  },
+  set: (k: string, v: string | null, s: Storage = localStorage) => {
+    try {
+      if (v == null) s.removeItem(k)
+      else s.setItem(k, v)
+    } catch {
+      /* storage unavailable */
     }
+  },
+}
+const restoring = ref(false)
+const removed = ref(false)
+const cookiesBlocked = ref(false)
+
+onMounted(async () => {
+  const fromUrl = typeof route.query.key === 'string' ? route.query.key : null
+  if (fromUrl) {
+    storage.set(KEY_STORE, fromUrl)
+    router.replace({ path: '/kiosk' })
+  } else if (!storage.get(KEY_STORE)) {
+    // Paired before 0.4.0: the cookie still works, so keep its key from now on.
+    const res = await fetch('auth/terminal/key', { credentials: 'same-origin' }).catch(() => null)
+    if (res?.ok) storage.set(KEY_STORE, (await res.json()).key)
   }
-}
+})
 
-async function unbook(b: Booking) {
-  for (const id of [...b.txnIds].reverse()) await api.undo(id)
-  if (b.shoppingItemId) await api.deleteShoppingItem(b.shoppingItemId)
-}
-
-function record(product: { id: number; name: string; unit: string }, m: KioskMode, booking: Booking, onList: boolean) {
-  const cur = current.value
-  if (cur && !cur.undone && cur.productId === product.id && cur.mode === m && Date.now() - cur.at < MERGE_MS) {
-    cur.bookings.push(booking)
-    cur.at = Date.now()
-    cur.onList = onList
-  } else {
-    if (cur) earlier.value = [cur, ...earlier.value].slice(0, 8)
-    current.value = { key: nextKey++, productId: product.id, name: product.name, unit: product.unit, mode: m, bookings: [booking], at: Date.now(), onList, undone: false }
-  }
-  if (m !== 'consume') lastModeUse = Date.now()
-  signal('ok')
-}
-
-// Nothing in stock to use: say so, and offer to correct the stock.
-const problem = ref<{ id: number; name: string; unit: string } | null>(null)
-const correcting = ref(false)
-const correctAmount = ref<number | string>(1)
-
-function notInStock(product: { id: number; name: string; unit: string }) {
-  problem.value = product
-  signal('error')
-}
-
-async function saveCorrection() {
-  const p = problem.value
-  const amount = Number(String(correctAmount.value).replace(',', '.'))
-  if (!p || !(amount > 0)) return
+async function restore() {
+  if (!auth.unpaired || restoring.value) return
+  const key = storage.get(KEY_STORE)
+  if (!key) return
+  // Signed in again a moment ago and lost it at once: if the key still works, the browser drops cookies.
+  const justRestored = Date.now() - Number(storage.get(RESTORE_GUARD, sessionStorage) ?? 0) < 20_000
+  restoring.value = true
   try {
-    await api.purchase({ product_id: p.id, amount })
-    correcting.value = false
-    problem.value = null
-    signal('ok', t.kiosk.corrected)
-  } catch (e) {
-    signal('error', errorText(e))
-  }
-}
-
-// Scans are handled one at a time, in order, even when they come in fast.
-let queue: Promise<void> = Promise.resolve()
-const unknown = ref<ScanLookup | null>(null)
-const busy = ref(false)
-
-function onScan(raw: string) {
-  search.value = ''
-  queue = queue.then(() => handleCode(raw.trim()))
-}
-
-async function handleCode(code: string) {
-  if (!code || unknown.value) return
-  busy.value = true
-  problem.value = null
-  const m = mode.value
-  try {
-    const res = await api.scan(code, m)
-    if (res.mode_switch && MODES.includes(res.mode_switch as KioskMode)) {
-      setMode(res.mode_switch as KioskMode)
-      signal('ok', t.kiosk.modeSwitched(t.kiosk.modes[res.mode_switch]))
-    } else if (res.product_id == null) {
-      unknown.value = res
-      signal('error', t.kiosk.unknown)
-    } else if (res.not_in_stock) {
-      const p = productsById.value.get(res.product_id)
-      notInStock({ id: res.product_id, name: res.product_name ?? p?.name ?? code, unit: res.unit ?? p?.unit ?? '' })
-    } else if (res.done) {
-      const booking = { txnIds: res.txn_ids ?? [], shoppingItemId: res.shopping_item_id, amount: res.amount ?? 1 }
-      record({ id: res.product_id, name: res.product_name ?? code, unit: res.unit ?? '' }, m, booking, !!res.on_shopping_list)
-    } else {
-      signal('error', t.kiosk.failed)
+    const res = await fetch('auth/terminal/session', {
+      method: 'POST',
+      credentials: 'same-origin',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ key }),
+    })
+    if (res.status === 401) {
+      storage.set(KEY_STORE, null)
+      removed.value = true
+    } else if (res.ok && justRestored) {
+      cookiesBlocked.value = true
+    } else if (res.ok) {
+      storage.set(RESTORE_GUARD, String(Date.now()), sessionStorage)
+      window.location.reload()
+      return
     }
-  } catch (e) {
-    signal('error', errorText(e))
-  } finally {
-    busy.value = false
+  } catch {
+    window.setTimeout(restore, 10_000) // Steward unreachable: try again
   }
+  restoring.value = false
 }
-
-async function bookProduct(p: Product, amount = 1) {
-  const m = mode.value
-  problem.value = null
-  if (NEEDS_STOCK.includes(m) && inStock(p.id) <= 0) return notInStock(p)
-  try {
-    const booking = await bookDirect(p.id, m, amount)
-    record(p, m, booking, false)
-  } catch (e) {
-    signal('error', errorText(e))
-  }
-}
-
-async function plus(card: Card) {
-  if (NEEDS_STOCK.includes(card.mode) && inStock(card.productId) <= 0) return signal('error', t.kiosk.noneLeft)
-  try {
-    card.bookings.push(await bookDirect(card.productId, card.mode, card.bookings.at(-1)?.amount || 1))
-    card.at = Date.now()
-    signal('ok')
-  } catch (e) {
-    signal('error', errorText(e))
-  }
-}
-
-async function minus(card: Card) {
-  const last = card.bookings.at(-1)
-  if (!last) return
-  try {
-    await unbook(last)
-    card.bookings.pop()
-    if (!card.bookings.length) card.undone = true
-    signal('ok')
-  } catch (e) {
-    signal('error', errorText(e))
-  }
-}
-
-async function useAll(card: Card) {
-  const left = inStock(card.productId)
-  if (left <= 0) return
-  try {
-    card.bookings.push(await bookDirect(card.productId, 'consume', left))
-    card.at = Date.now()
-    signal('ok')
-  } catch (e) {
-    signal('error', errorText(e))
-  }
-}
-
-async function undoCard(card: Card) {
-  try {
-    while (card.bookings.length) {
-      await unbook(card.bookings.at(-1)!)
-      card.bookings.pop()
-    }
-    card.undone = true
-    signal('ok', t.kiosk.undone)
-  } catch (e) {
-    signal('error', errorText(e))
-  }
-}
-
-// Unknown barcode: create or link the product (ScanResultCard in "look up" mode), then book the scan.
-function unknownDone() {
-  const code = unknown.value?.code
-  unknown.value = null
-  if (code) queue = queue.then(() => handleCode(code))
-}
-
-// --- search with the keyboard ----------------------------------------------
-
-const search = ref('')
-const picked = ref<number | null>(null)
-function onPick(id: number | null) {
-  const p = id != null ? productsById.value.get(id) : undefined
-  picked.value = null
-  search.value = ''
-  ;(document.activeElement as HTMLElement | null)?.blur()
-  if (p) bookProduct(p)
-}
-
-useWedgeScanner(onScan, { inFields: true })
-
-// --- pairing ---------------------------------------------------------------
+watch(() => auth.unpaired, restore, { immediate: true })
 
 const pairCode = ref('')
-const wasPaired = (() => {
-  try {
-    return localStorage.getItem('steward.kiosk.paired') === '1'
-  } catch {
-    return false
-  }
-})()
-onMounted(() => {
-  api
-    .info()
-    .then(() => {
-      try {
-        localStorage.setItem('steward.kiosk.paired', '1')
-      } catch {
-        /* storage unavailable */
-      }
-    })
-    .catch(() => undefined)
-})
 function pair() {
   const code = pairCode.value.trim()
   if (code) window.location.href = `auth/terminal?code=${encodeURIComponent(code)}`
 }
 
-const productImage = (id: number) => productsById.value.get(id)?.image_url ?? null
-const amountText = (c: Card) => formatAmount(total(c), c.unit)
-const leftText = (c: Card) => {
-  const left = inStock(c.productId)
-  return left > 0 ? t.kiosk.left(formatAmount(left, c.unit)) : t.kiosk.noneLeft
-}
+// --- outside the scan tab, a booking shows as a banner -------------------------------------
+
+const showBanner = computed(() => tab.value !== 'scan' && now.value < kiosk.bannerUntil.value)
+const banner = computed(() => {
+  const c = kiosk.current.value
+  if (kiosk.problem.value || flash.value === 'error' || !c) return { text: kiosk.message.value ?? t.kiosk.failed, card: null }
+  if (kiosk.message.value) return { text: kiosk.message.value, card: null }
+  return { text: `${t.kiosk.did[c.mode]} · ${formatAmount(kiosk.total(c), c.unit)} ${c.name}`, card: c }
+})
+watch(tab, () => (kiosk.bannerUntil.value = 0))
 </script>
 
 <template>
   <div class="kiosk" :class="flash ? `kiosk--${flash}` : ''">
     <!-- Not paired (yet, or any more) -->
     <div v-if="auth.unpaired" class="kiosk__pair">
-      <v-card variant="flat" border max-width="560" class="pa-6">
+      <v-progress-circular v-if="restoring" indeterminate size="64" color="primary" />
+      <v-card v-else variant="flat" border max-width="560" class="pa-6">
         <v-icon icon="mdi-monitor-dashboard" size="48" color="primary" class="mb-3" />
         <div class="text-h5 font-weight-bold mb-2">{{ t.kiosk.pairTitle }}</div>
-        <v-alert v-if="wasPaired" type="warning" variant="tonal" density="compact" class="mb-3" :text="t.kiosk.removed" />
+        <v-alert v-if="removed" type="warning" variant="tonal" density="compact" class="mb-3" :text="t.kiosk.removed" />
+        <v-alert v-if="cookiesBlocked" type="error" variant="tonal" density="compact" class="mb-3" :text="t.kiosk.cookiesBlocked" />
         <p class="text-body-1 text-medium-emphasis mb-5">{{ t.kiosk.pairText }}</p>
         <form class="d-flex ga-3" @submit.prevent="pair">
           <v-text-field
@@ -352,7 +225,7 @@ const leftText = (c: Card) => {
     </div>
 
     <template v-else>
-      <v-sheet :color="style.color" class="kiosk__bar d-flex align-center px-4 ga-2">
+      <v-sheet :color="kiosk.style.value.color" class="kiosk__bar d-flex align-center px-4 ga-2">
         <div class="kiosk__clock mr-2">{{ clock.format(now) }}</div>
         <div class="d-flex flex-wrap ga-2 flex-grow-1">
           <v-btn
@@ -362,10 +235,10 @@ const leftText = (c: Card) => {
             :color="mode === m ? 'surface' : undefined"
             size="x-large"
             rounded="lg"
-            :prepend-icon="STYLE[m].icon"
+            :prepend-icon="MODE_STYLE[m].icon"
             class="kiosk__mode"
             :class="{ 'kiosk__mode--off': mode !== m }"
-            @click="setMode(m)"
+            @click="kiosk.setMode(m)"
           >
             {{ t.kiosk.modes[m] }}
           </v-btn>
@@ -373,151 +246,75 @@ const leftText = (c: Card) => {
         <v-icon :icon="connected ? 'mdi-circle' : 'mdi-circle-outline'" :color="connected ? 'white' : 'warning'" size="14" :title="connected ? t.app.live : t.kiosk.offline" />
       </v-sheet>
 
-      <div class="kiosk__body">
-        <section class="kiosk__main">
+      <div class="kiosk__frame">
+        <nav class="kiosk__rail">
+          <v-btn
+            v-for="item in TABS"
+            :key="item.value"
+            :variant="tab === item.value ? 'tonal' : 'text'"
+            :color="tab === item.value ? 'primary' : undefined"
+            stacked
+            rounded="lg"
+            height="84"
+            class="kiosk__rail-btn"
+            :prepend-icon="item.icon"
+            @click="tab = item.value"
+          >
+            {{ t.kiosk.tabs[item.value] }}
+          </v-btn>
+          <v-spacer />
+          <v-btn variant="text" stacked rounded="lg" height="84" class="kiosk__rail-btn" prepend-icon="mdi-bluetooth" @click="bluetoothOpen = true">
+            {{ t.kiosk.bt.title }}
+          </v-btn>
+        </nav>
+
+        <main class="kiosk__body">
           <v-alert v-if="!connected" type="warning" variant="tonal" density="compact" class="mb-4" :text="t.kiosk.offline" />
           <v-alert
-            v-else-if="message"
-            :type="flash === 'error' || !flash ? 'info' : 'success'"
+            v-else-if="showBanner"
+            :type="flash === 'error' || kiosk.problem.value ? 'error' : 'success'"
+            variant="tonal"
+            class="mb-4"
+            :text="banner.text"
+          >
+            <template #append>
+              <v-btn v-if="banner.card && !banner.card.undone" variant="text" size="large" prepend-icon="mdi-undo" @click="kiosk.undoCard(banner.card)">{{ t.kiosk.undo }}</v-btn>
+              <v-btn v-if="kiosk.problem.value" variant="text" size="large" @click="tab = 'scan'">{{ t.kiosk.show }}</v-btn>
+            </template>
+          </v-alert>
+          <v-alert
+            v-else-if="tab === 'scan' && kiosk.message.value && !kiosk.problem.value"
+            :type="flash === 'error' ? 'error' : 'info'"
             variant="tonal"
             density="compact"
             class="mb-4"
             closable
-            :text="message"
-            @click:close="message = null"
+            :text="kiosk.message.value"
+            @click:close="kiosk.message.value = null"
           />
 
-          <!-- Nothing in stock -->
-          <v-card v-if="problem" variant="flat" border class="pa-6 mb-4 kiosk__problem">
-            <div class="d-flex align-center ga-4">
-              <v-icon icon="mdi-alert-circle-outline" size="56" color="error" />
-              <div class="text-h5">{{ t.kiosk.notInStock(problem.name) }}</div>
-            </div>
-            <div class="d-flex flex-wrap ga-3 mt-5">
-              <v-btn color="primary" variant="flat" size="x-large" prepend-icon="mdi-pencil" @click="correctAmount = 1; correcting = true">{{ t.kiosk.correct }}</v-btn>
-              <v-btn variant="tonal" size="x-large" @click="problem = null">{{ t.kiosk.ignore }}</v-btn>
-            </div>
-          </v-card>
-
-          <!-- The last scan -->
-          <v-card v-else-if="current" :key="current.key" variant="flat" border class="pa-6 mb-4" :class="{ 'kiosk__card--undone': current.undone }">
-            <div class="d-flex align-center ga-5">
-              <v-avatar size="112" rounded="lg" :color="STYLE[current.mode].color" variant="tonal">
-                <v-img v-if="productImage(current.productId)" :src="productImage(current.productId)!" cover />
-                <span v-else class="text-h3 font-weight-bold">{{ current.name.charAt(0).toUpperCase() }}</span>
-              </v-avatar>
-              <div class="flex-grow-1" style="min-width: 0">
-                <div class="text-h6 text-medium-emphasis d-flex align-center ga-2">
-                  <v-icon :icon="STYLE[current.mode].icon" size="22" />
-                  <template v-if="current.undone">{{ t.kiosk.undone }}</template>
-                  <template v-else>{{ t.kiosk.did[current.mode] }} · {{ amountText(current) }}</template>
-                  <v-chip v-if="current.bookings.length > 1" size="small" label :color="STYLE[current.mode].color">{{ t.kiosk.times(current.bookings.length) }}</v-chip>
-                </div>
-                <div class="text-h3 font-weight-bold kiosk__name">{{ current.name }}</div>
-                <div class="d-flex flex-wrap align-center ga-2 mt-2">
-                  <span class="text-h5">{{ leftText(current) }}</span>
-                  <v-chip v-if="current.onList || stockById.get(current.productId)?.below_min" color="secondary" variant="tonal" prepend-icon="mdi-cart-outline" label>
-                    {{ t.kiosk.onList }}
-                  </v-chip>
-                </div>
-              </div>
-            </div>
-            <div v-if="!current.undone" class="d-flex flex-wrap align-center ga-3 mt-6">
-              <v-btn icon="mdi-minus" size="x-large" variant="tonal" :aria-label="t.kiosk.less" :title="t.kiosk.less" @click="minus(current)" />
-              <v-btn icon="mdi-plus" size="x-large" variant="tonal" :aria-label="t.kiosk.more" :title="t.kiosk.more" @click="plus(current)" />
-              <v-btn v-if="current.mode === 'consume' && inStock(current.productId) > 0" size="x-large" variant="tonal" prepend-icon="mdi-check-all" @click="useAll(current)">
-                {{ t.kiosk.useAll }}
-              </v-btn>
-              <v-spacer />
-              <v-btn size="x-large" variant="text" prepend-icon="mdi-undo" @click="undoCard(current)">{{ t.kiosk.undo }}</v-btn>
-            </div>
-          </v-card>
-
-          <!-- Waiting for a scan -->
-          <div v-else class="kiosk__ready text-center py-10">
-            <v-progress-circular v-if="busy" indeterminate size="72" :color="style.color" />
-            <v-icon v-else icon="mdi-barcode-scan" size="96" :color="style.color" />
-            <div class="text-h4 font-weight-bold mt-4">{{ t.kiosk.ready }}</div>
-            <div class="text-h6 text-medium-emphasis">{{ t.kiosk.readyHint }}</div>
+          <KioskScan v-if="tab === 'scan'" :stock-by-id="stockById" />
+          <div v-else-if="tab === 'stock'" class="kiosk__split">
+            <KioskStock :stock="stock" />
+            <KioskChores />
           </div>
-          <div v-if="mode !== 'consume'" class="text-body-1 text-medium-emphasis mb-4">
-            <v-icon icon="mdi-timer-sand" size="18" /> {{ t.kiosk.backSoon }}
-          </div>
-
-          <template v-if="earlier.length">
-            <div class="text-overline text-medium-emphasis">{{ t.kiosk.earlier }}</div>
-            <v-list class="bg-transparent py-0">
-              <v-list-item v-for="c in earlier" :key="c.key" class="px-0" :class="{ 'kiosk__card--undone': c.undone }">
-                <template #prepend>
-                  <v-avatar :color="STYLE[c.mode].color" variant="tonal" size="40"><v-icon :icon="STYLE[c.mode].icon" size="20" /></v-avatar>
-                </template>
-                <v-list-item-title class="text-h6">{{ c.name }}</v-list-item-title>
-                <v-list-item-subtitle>
-                  {{ c.undone ? t.kiosk.undone : `${t.kiosk.did[c.mode]} · ${amountText(c)}` }} · {{ timeFmt.format(c.at) }}
-                </v-list-item-subtitle>
-                <template v-if="!c.undone" #append>
-                  <v-btn variant="text" size="large" prepend-icon="mdi-undo" @click="undoCard(c)">{{ t.kiosk.undo }}</v-btn>
-                </template>
-              </v-list-item>
-            </v-list>
-          </template>
-        </section>
-
-        <aside class="kiosk__side">
-          <v-autocomplete
-            v-model="picked"
-            v-model:search="search"
-            :items="state.products"
-            item-title="name"
-            item-value="id"
-            :placeholder="t.kiosk.search"
-            prepend-inner-icon="mdi-magnify"
-            variant="solo-filled"
-            flat
-            hide-details
-            hide-no-data
-            auto-select-first
-            class="mb-4"
-            @update:model-value="onPick"
-          />
-          <template v-if="frequent.length">
-            <div class="text-overline text-medium-emphasis">{{ t.kiosk.frequent }}</div>
-            <div class="kiosk__tiles">
-              <v-btn
-                v-for="p in frequent"
-                :key="p.id"
-                variant="tonal"
-                :color="style.color"
-                rounded="lg"
-                height="96"
-                stacked
-                class="kiosk__tile"
-                @click="bookProduct(p)"
-              >
-                <v-avatar v-if="p.image_url" size="40" rounded="lg" class="mb-1"><v-img :src="p.image_url" cover /></v-avatar>
-                <span class="kiosk__tile-name">{{ p.name }}</span>
-                <span class="text-caption text-medium-emphasis">{{ formatAmount(inStock(p.id), p.unit) }}</span>
-              </v-btn>
-            </div>
-          </template>
-        </aside>
+          <KioskRecipes v-else-if="tab === 'recipes'" />
+          <PhotoScan v-else-if="tab === 'photo'" large />
+        </main>
       </div>
     </template>
 
     <!-- Unknown barcode: create or link the product, then the scan is booked -->
-    <v-dialog :model-value="!!unknown" max-width="640" persistent>
-      <ScanResultCard v-if="unknown" :result="unknown" mode="lookup" :stock="stockById" @done="unknownDone" @close="unknown = null" />
+    <v-dialog :model-value="!!kiosk.unknown.value" max-width="640" persistent>
+      <ScanResultCard v-if="kiosk.unknown.value" :result="kiosk.unknown.value" mode="lookup" :stock="stockById" @done="kiosk.unknownDone()" @close="kiosk.unknown.value = null" />
     </v-dialog>
 
-    <v-dialog v-model="correcting" max-width="420">
-      <v-card v-if="problem" :title="t.kiosk.correctTitle(problem.name)">
-        <v-card-text>
-          <v-text-field v-model="correctAmount" type="number" min="0" step="any" :suffix="problem.unit" autofocus hide-details @keydown.enter="saveCorrection" />
-        </v-card-text>
+    <v-dialog v-model="bluetoothOpen" max-width="640" scrollable>
+      <v-card :title="t.kiosk.bt.title">
+        <v-card-text><KioskBluetooth v-if="bluetoothOpen" /></v-card-text>
         <v-card-actions>
           <v-spacer />
-          <v-btn @click="correcting = false">{{ t.common.cancel }}</v-btn>
-          <v-btn color="primary" variant="flat" @click="saveCorrection">{{ t.common.save }}</v-btn>
+          <v-btn size="large" @click="bluetoothOpen = false">{{ t.common.close }}</v-btn>
         </v-card-actions>
       </v-card>
     </v-dialog>
@@ -562,48 +359,48 @@ const leftText = (c: Card) => {
 .kiosk__mode--off {
   color: inherit !important;
 }
+.kiosk__frame {
+  display: flex;
+  flex-grow: 1;
+  min-height: 0;
+}
+.kiosk__rail {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 12px 8px;
+  width: 112px;
+  flex-shrink: 0;
+  border-right: 1px solid rgba(var(--v-border-color), var(--v-border-opacity));
+  position: sticky;
+  top: 76px;
+  height: calc(100vh - 76px);
+}
+.kiosk__rail-btn {
+  letter-spacing: 0;
+  font-size: 0.95rem;
+}
 .kiosk__body {
+  flex-grow: 1;
+  min-width: 0;
+  padding: 24px;
+}
+.kiosk__split {
   display: grid;
   grid-template-columns: minmax(0, 3fr) minmax(0, 2fr);
   gap: 24px;
-  padding: 24px;
-  flex-grow: 1;
+  align-items: start;
 }
-@media (max-width: 800px) {
-  .kiosk__body {
+@media (max-width: 900px) {
+  .kiosk__split {
     grid-template-columns: minmax(0, 1fr);
+  }
+  .kiosk__rail {
+    width: 84px;
+  }
+  .kiosk__body {
     padding: 16px;
   }
-}
-.kiosk__name {
-  overflow-wrap: anywhere;
-  line-height: 1.15;
-}
-.kiosk__card--undone {
-  opacity: 0.5;
-}
-.kiosk__problem {
-  border-color: rgb(var(--v-theme-error)) !important;
-}
-.kiosk__tiles {
-  display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(130px, 1fr));
-  gap: 10px;
-}
-.kiosk__tile {
-  min-width: 0 !important;
-  text-transform: none;
-  letter-spacing: 0;
-}
-.kiosk__tile-name {
-  font-size: 1rem;
-  font-weight: 600;
-  white-space: normal;
-  line-height: 1.2;
-  overflow: hidden;
-  display: -webkit-box;
-  -webkit-line-clamp: 2;
-  -webkit-box-orient: vertical;
 }
 .kiosk__pair {
   min-height: 100vh;

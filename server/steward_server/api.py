@@ -269,15 +269,21 @@ async def post_purchase(session: Session, hub: Hub, actor: Actor, body: Purchase
 @router.post("/stock/consume")
 async def post_consume(session: Session, hub: Hub, actor: Actor, body: ConsumeIn) -> dict:
     before = await stock.last_txn_id(session)
-    taken = await stock.consume(session, hub, body.product_id, body.amount, spoiled=body.spoiled, actor=actor)
-    return {"consumed": taken, "txn_ids": await stock.txn_ids_after(session, before)}
+    taken = await stock.consume(
+        session, hub, body.product_id, body.amount, spoiled=body.spoiled, entry_id=body.entry_id, actor=actor
+    )
+    return {
+        "consumed": taken,
+        "txn_ids": await stock.txn_ids_after(session, before),
+        "entry_ids": await stock.entry_ids_after(session, before),
+    }
 
 
 @router.post("/stock/open")
 async def post_open(session: Session, hub: Hub, actor: Actor, body: OpenIn) -> dict:
     before = await stock.last_txn_id(session)
-    await stock.open_product(session, hub, body.product_id, body.amount, actor=actor)
-    return {"txn_ids": await stock.txn_ids_after(session, before)}
+    await stock.open_product(session, hub, body.product_id, body.amount, entry_id=body.entry_id, actor=actor)
+    return {"txn_ids": await stock.txn_ids_after(session, before), "entry_ids": await stock.entry_ids_after(session, before)}
 
 
 @router.patch("/stock/entries/{entry_id}", response_model=StockEntryOut)

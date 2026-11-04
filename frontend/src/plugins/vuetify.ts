@@ -23,6 +23,8 @@ export const vuetify = createVuetify({
           background: '#f4fbf8',
           surface: '#ffffff',
           'surface-variant': '#dae5e1',
+          // Vuetify's own default here is a light grey, which made tooltip text unreadable.
+          'on-surface-variant': '#3f4946',
           'surface-container': '#e9efec',
           error: '#ba1a1a',
           warning: '#b26a00',
@@ -39,6 +41,7 @@ export const vuetify = createVuetify({
           background: '#0e1513',
           surface: '#161d1b',
           'surface-variant': '#3f4946',
+          'on-surface-variant': '#dae5e1',
           'surface-container': '#1e2624',
           error: '#ffb4ab',
           warning: '#ffb952',

@@ -83,10 +83,11 @@ The integration authenticates with `STEWARD_API_TOKEN` (`dev-token` in the demo)
 - **Bottle deposit:** the deposit card shows the money balance and how many bottles and cans are still to take back (bought with deposit minus returned).
 - **Receipt texts:** Steward learns which receipt text means which product when you assign a line. In Edit product, the texts show as chips: add, remove or move them from another product. Open receipts are matched again right away.
 - **Corrections:** a batch's amount, date and price can be edited from its row in Stock. A changed amount shows up in the history as "Corrected" and can be undone. Barcodes can be removed in Edit product, and receipts can be deleted; what they put into stock stays.
-- **Kitchen terminal:** a Raspberry Pi with a screen and a USB barcode scanner, paired once under Settings → Kitchen terminals, opens a full-screen kiosk page (`#/kiosk`).
-  - **What it can do:** use, add, open or throw away stock by scan or tap, plus printed mode cards.
-  - **Access:** it can only reach stock and scanning.
-  - **Setup:** `kiosk/setup-pi.sh` sets up the Pi; see [INSTALL.md](INSTALL.md#kitchen-terminal-optional).
+- **Kitchen terminal:** a Raspberry Pi with a screen and a barcode scanner (USB or Bluetooth), paired once under Settings → Kitchen terminals, opens a full-screen kiosk page (`#/kiosk`).
+  - **Tabs:** Scan (by scanner, typing or tiles, with mode cards), Stock & chores side by side, Recipes in large print, and Photo for AI recognition with a USB camera.
+  - **Access:** it can only reach stock, scanning, chores and recipes.
+  - **Setup:** `kiosk/setup-pi.sh` sets up the Pi and installs `kiosk/steward-kiosk-agent`, which pairs Bluetooth scanners for the kiosk page; see [INSTALL.md](INSTALL.md#kitchen-terminal-optional).
+- **Choosing the pack:** a product's batches each have their own Use, Opened and Throw away (Stock page, Scan page, kiosk). Without a choice, opened packs go first, then the one that expires first.
 - **eBons from email:** Settings → Receipts from email. Steward checks a mailbox over IMAP every 15 minutes (configurable) for mails from REWE with a PDF and imports them.
   - Gmail needs an app password.
   - The mailbox is opened read-only, unless imported mails should be marked as read.

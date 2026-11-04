@@ -1,9 +1,12 @@
 <script setup lang="ts">
+import { useRoute } from 'vue-router'
 import { t } from '@/i18n'
 import type { AiProblem } from '@/composables/aiErrors'
 
 defineProps<{ problem: AiProblem }>()
 const emit = defineEmits<{ close: [] }>()
+// The kitchen terminal can't open Settings: point to another device instead.
+const kiosk = useRoute().meta.kiosk === true
 </script>
 
 <template>
@@ -16,7 +19,7 @@ const emit = defineEmits<{ close: [] }>()
     closable
     @click:close="emit('close')"
   >
-    <div class="text-body-2">{{ problem.kind === 'setup' ? t.ai.notSetUpHint : problem.message }}</div>
-    <v-btn v-if="problem.kind === 'setup'" to="/settings" size="small" variant="tonal" class="mt-2" prepend-icon="mdi-cog-outline">{{ t.ai.openSettings }}</v-btn>
+    <div class="text-body-2">{{ problem.kind === 'setup' ? (kiosk ? t.kiosk.aiElsewhere : t.ai.notSetUpHint) : problem.message }}</div>
+    <v-btn v-if="problem.kind === 'setup' && !kiosk" to="/settings" size="small" variant="tonal" class="mt-2" prepend-icon="mdi-cog-outline">{{ t.ai.openSettings }}</v-btn>
   </v-alert>
 </template>

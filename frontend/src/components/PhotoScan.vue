@@ -15,6 +15,8 @@ import EmptyState from './EmptyState.vue'
 import type { Product, RecognizedItem } from '@/types'
 import LocationSelect from './LocationSelect.vue'
 
+// `large`: the kitchen terminal's layout (bigger photos, no gallery, the camera only where the browser allows it).
+const props = defineProps<{ large?: boolean }>()
 const { state, productsById, categories, units } = useCatalog()
 
 const MAX = 3
@@ -31,8 +33,10 @@ function addPhoto(file: File) {
 }
 
 /** The live camera where the browser allows it; otherwise the system's camera through a file input. */
+const noCamera = ref(false)
 function takePhoto() {
   if (cameraAvailable()) cameraOpen.value = true
+  else if (props.large) noCamera.value = true
   else cameraInput.value?.click()
 }
 
@@ -154,7 +158,8 @@ function reset() {
     <v-card variant="flat" border class="mb-4">
       <v-card-text>
         <div class="text-body-2 text-medium-emphasis mb-3">{{ t.scan.photoIntro }}</div>
-        <div class="photo-grid mb-3">
+        <v-alert v-if="noCamera" type="info" variant="tonal" class="mb-3" icon="mdi-camera-off-outline" :text="t.kiosk.cameraNeedsSetup" closable @click:close="noCamera = false" />
+        <div class="photo-grid mb-3" :class="{ 'photo-grid--large': large }">
           <div v-for="(p, i) in photos" :key="p.url" class="photo-tile">
             <v-img :src="p.url" cover :aspect-ratio="1" class="rounded-lg" />
             <v-btn icon="mdi-close" size="x-small" variant="flat" color="surface" class="photo-remove" :title="t.common.delete" @click="removePhoto(i)" />
@@ -172,12 +177,12 @@ function reset() {
         </div>
         <div class="d-flex flex-wrap ga-2 mb-3">
           <v-btn variant="tonal" color="primary" prepend-icon="mdi-camera-outline" :disabled="photos.length >= MAX || preparing" @click="takePhoto">{{ t.wardrobe.takePhoto }}</v-btn>
-          <v-btn variant="tonal" prepend-icon="mdi-image-multiple-outline" :disabled="photos.length >= MAX" :loading="preparing" @click="galleryInput?.click()">{{ t.wardrobe.choosePhoto }}</v-btn>
+          <v-btn v-if="!large" variant="tonal" prepend-icon="mdi-image-multiple-outline" :disabled="photos.length >= MAX" :loading="preparing" @click="galleryInput?.click()">{{ t.wardrobe.choosePhoto }}</v-btn>
           <span class="text-caption text-medium-emphasis align-self-center">{{ t.scan.maxPhotos }}</span>
         </div>
         <input ref="cameraInput" type="file" accept="image/*" capture="environment" hidden @change="picked" />
         <input ref="galleryInput" type="file" accept="image/*" multiple hidden @change="picked" />
-        <CameraDialog v-model="cameraOpen" @captured="addPhoto" @fallback="cameraInput?.click()" />
+        <CameraDialog v-model="cameraOpen" @captured="addPhoto" @fallback="large ? (noCamera = true) : cameraInput?.click()" />
         <v-text-field v-model="hint" :label="t.scan.hint" :placeholder="t.scan.hintPlaceholder" persistent-placeholder hide-details class="mb-3" />
         <v-btn color="primary" variant="flat" size="large" block prepend-icon="mdi-creation" :disabled="!photos.length" :loading="busy" @click="recognize">{{ t.scan.recognize }}</v-btn>
         <v-expand-transition>
@@ -252,6 +257,9 @@ function reset() {
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 120px));
   gap: 8px;
+}
+.photo-grid--large {
+  grid-template-columns: repeat(3, minmax(0, 220px));
 }
 .photo-tile {
   position: relative;

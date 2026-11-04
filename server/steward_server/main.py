@@ -29,6 +29,7 @@ from .routes import terminals as terminal_routes
 from .routes import wardrobe as wardrobe_routes
 from .services import ServiceError, receipts
 from .services.files import FileStore
+from .services.terminal_agent import AgentHub
 from .services.terminals import Registry
 
 LOG = logging.getLogger("steward")
@@ -46,6 +47,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         app.state.files = FileStore(settings.data_dir)
         app.state.bridge = HABridge()
         app.state.terminals = Registry()
+        app.state.agents = AgentHub()
         async with db.sessions() as session:
             await receipts.backfill_pieces(session)
             await app.state.terminals.load(session)
@@ -113,9 +115,11 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         async def spa(path: str) -> FileResponse:
             # Single-page app: unknown paths get index.html; the router in the browser takes over.
             candidate = STATIC_DIR / path
-            if path and candidate.is_file() and STATIC_DIR in candidate.resolve().parents:
+            if path and candidate.is_file() and STATIC_DIR in candidate.resolve().parents and candidate.name != "index.html":
                 return FileResponse(candidate)
-            return FileResponse(STATIC_DIR / "index.html")
+            # Always check for a newer index.html (its assets have hashed names and cache fine): a kiosk
+            # screen nobody reloads would otherwise keep running the old version after an update.
+            return FileResponse(STATIC_DIR / "index.html", headers={"Cache-Control": "no-cache"})
 
     return app
 

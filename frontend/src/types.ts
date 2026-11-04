@@ -611,6 +611,8 @@ export interface ScanResult extends ScanLookup {
   product_name?: string
   unit?: string
   txn_ids?: number[]
+  /** The batches the scan used, in order. */
+  entry_ids?: number[]
   shopping_item_id?: number
   in_stock?: number
   on_shopping_list?: boolean
@@ -777,3 +779,21 @@ export interface EmailImportSettings {
 
 /** What the form sends; a password left out keeps the stored one. */
 export type EmailImportIn = Partial<Omit<EmailImportSettings, 'password_set' | 'last_run'>> & { password?: string }
+
+/** A command for the kitchen terminal's helper on the Pi (Bluetooth pairing), relayed by Steward. */
+export interface AgentCommand {
+  id: number
+  type: string
+  status: 'pending' | 'running' | 'done' | 'failed'
+  result: unknown
+  error: string | null
+}
+
+export interface BluetoothDevice {
+  address: string
+  name: string | null
+  icon: string | null
+  paired: boolean
+  trusted: boolean
+  connected: boolean
+}
