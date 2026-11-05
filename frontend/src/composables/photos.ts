@@ -33,8 +33,19 @@ function draw(source: CanvasImageSource, width: number, height: number): HTMLCan
   const canvas = document.createElement('canvas')
   canvas.width = Math.round(width * scale)
   canvas.height = Math.round(height * scale)
-  canvas.getContext('2d')!.drawImage(source, 0, 0, canvas.width, canvas.height)
+  // willReadFrequently keeps the canvas in main memory. On the GPU, WebKitGTK (the kitchen terminal on a
+  // Raspberry Pi) draws a camera frame as nothing but black.
+  canvas.getContext('2d', { willReadFrequently: true })!.drawImage(source, 0, 0, canvas.width, canvas.height)
   return canvas
+}
+
+/** Whether the canvas holds nothing but black: the camera's frame never arrived. A dark room still has noise. */
+function isBlank(canvas: HTMLCanvasElement): boolean {
+  const { data } = canvas.getContext('2d', { willReadFrequently: true })!.getImageData(0, 0, canvas.width, canvas.height)
+  for (let i = 0; i < data.length; i += 4) {
+    if (data[i] || data[i + 1] || data[i + 2]) return false
+  }
+  return true
 }
 
 function baseName(name: string) {
@@ -65,6 +76,8 @@ export async function preparePhoto(file: File): Promise<File> {
 
 /** The current frame of a playing video as a JPEG file. */
 export async function captureFrame(video: HTMLVideoElement): Promise<File> {
-  const jpeg = await toJpeg(draw(video, video.videoWidth, video.videoHeight))
+  const canvas = draw(video, video.videoWidth, video.videoHeight)
+  if (isBlank(canvas)) throw new Error(t.photo.black)
+  const jpeg = await toJpeg(canvas)
   return new File([jpeg], `photo-${Date.now()}.jpg`, { type: 'image/jpeg' })
 }

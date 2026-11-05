@@ -354,6 +354,7 @@ const en = {
   photo: {
     shoot: 'Take photo', switchCamera: 'Switch camera', cameraApp: 'Use the camera app',
     unreadable: "This photo can't be read. Try another one or take a new photo.", empty: 'The photo came through empty. Pick it again or take a new photo.',
+    black: 'The camera only gave a black picture. Try again, or use the camera app.',
   },
   locations: {
     title: 'Storage locations', intro: 'Where things are kept: fridge, freezer, pantry, cellar. Products have a usual place; single batches can be moved.',
@@ -793,6 +794,7 @@ const de: Messages = {
   photo: {
     shoot: 'Foto aufnehmen', switchCamera: 'Kamera wechseln', cameraApp: 'Kamera-App verwenden',
     unreadable: 'Dieses Foto lässt sich nicht lesen. Versuch ein anderes oder mach ein neues.', empty: 'Das Foto kam leer an. Wähl es noch einmal oder mach ein neues.',
+    black: 'Die Kamera hat nur ein schwarzes Bild geliefert. Versuch es noch einmal oder nimm die Kamera-App.',
   },
   locations: {
     title: 'Lagerorte', intro: 'Wo Dinge aufbewahrt werden: Kühlschrank, Gefrierfach, Vorratsschrank, Keller. Produkte haben einen üblichen Ort; einzelne Chargen lassen sich verschieben.',

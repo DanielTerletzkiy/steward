@@ -1,6 +1,6 @@
 [package]
 name = "steward-kiosk"
-version = "0.5.0"
+version = "0.5.1"
 description = "Steward kitchen terminal: Steward's kiosk page full screen, with Bluetooth pairing and screen control"
 authors = ["Daniel Terletzkiy"]
 repository = "https://github.com/DanielTerletzkiy/steward"
